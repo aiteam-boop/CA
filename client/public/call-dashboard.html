@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bolna Call Dashboard</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8fafc;
+    }
+
+    .loader {
+      border: 3px solid #e2e8f0;
+      border-top: 3px solid #3b82f6;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+</head>
+
+<body class="text-slate-800 antialiased min-h-screen">
+
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+    <!-- Top Section: Call Card -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-8 max-w-lg mx-auto">
+      <div class="text-center mb-6">
+        <h1 class="text-2xl font-bold text-slate-900 mb-2">Connect with us</h1>
+        <p class="text-sm text-slate-500">Enter your phone number and we'll call you instantly via Bolna Voice AI.</p>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label for="phone" class="block text-sm font-medium text-slate-700 mb-1">Phone Number (with country
+            code)</label>
+          <input type="tel" id="phone" value="+919321774772"
+            class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" />
+        </div>
+
+        <div class="hidden">
+          <label for="agentId" class="block text-sm font-medium text-slate-700 mb-1">Agent ID (Optional)</label>
+          <input type="text" id="agentId" placeholder="agent_xyz..."
+            class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" />
+        </div>
+
+        <button id="callButton"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl transition-colors flex justify-center items-center gap-2">
+          <span class="btn-text">Call Now</span>
+          <div class="loader hidden" id="callLoader"></div>
+        </button>
+
+        <div id="statusMessage" class="hidden rounded-xl p-4 text-sm font-medium text-center"></div>
+      </div>
+    </div>
+
+    <!-- Dashboard Header -->
+    <div class="flex justify-between items-center mb-6">
+      <h2 class="text-2xl font-bold text-slate-900">Call History & Analytics</h2>
+      <button id="refreshBtn"
+        class="flex items-center gap-2 text-sm text-slate-600 hover:text-blue-600 font-medium transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        Refresh Data
+      </button>
+    </div>
+
+    <!-- Analytics Section -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+        <div class="text-sm font-medium text-slate-500 mb-1">Total Executions</div>
+        <div class="text-2xl font-bold text-slate-900" id="statTotalExecutions">-</div>
+      </div>
+      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+        <div class="text-sm font-medium text-slate-500 mb-1">Status Breakdown</div>
+        <div class="text-sm font-semibold text-emerald-600" id="statCompleted">Completed: -</div>
+        <div class="text-sm font-semibold text-blue-600" id="statInProgress">In Progress: -</div>
+      </div>
+      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+        <div class="text-sm font-medium text-slate-500 mb-1">Total Duration / Avg</div>
+        <div class="text-2xl font-bold text-slate-900">
+          <span id="statTotalDuration">-</span>
+          <span class="text-sm text-slate-500 font-medium ml-1">/ <span id="statAvgDuration">-</span> avg</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters Section -->
+    <div
+      class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div>
+        <label for="searchId"
+          class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Search</label>
+        <input type="text" id="searchId" placeholder="Search by ID or Number..."
+          class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+      </div>
+      <div>
+        <label for="filterStatus"
+          class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Status</label>
+        <select id="filterStatus"
+          class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+          <option value="">All Statuses</option>
+          <option value="completed">Completed</option>
+          <option value="in-progress">In Progress</option>
+          <option value="busy">Busy</option>
+          <option value="failed">Failed</option>
+        </select>
+      </div>
+      <div>
+        <label for="filterType" class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Call
+          Type</label>
+        <select id="filterType"
+          class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+          <option value="">All Types</option>
+          <option value="outbound">Outbound</option>
+          <option value="inbound">Inbound</option>
+          <option value="web">Web</option>
+        </select>
+      </div>
+      <div>
+        <label for="filterProvider"
+          class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Provider</label>
+        <select id="filterProvider"
+          class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+          <option value="">All Providers</option>
+          <option value="twilio">Twilio</option>
+          <option value="vonage">Vonage</option>
+          <option value="plivo">Plivo</option>
+          <option value="exotel">Exotel</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Table Section -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
+      <div id="tableLoader"
+        class="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-10 hidden">
+        <div class="flex flex-col items-center gap-3">
+          <div class="loader" style="width:30px;height:30px;border-width:4px;"></div>
+          <span class="text-sm font-medium text-slate-600">Fetching Data...</span>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto overflow-y-auto max-h-[500px]">
+        <table class="w-full text-left border-collapse relative min-w-[900px]">
+          <thead class="sticky top-0 bg-slate-50 z-10 shadow-sm">
+            <tr class="text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
+              <th class="px-6 py-4 font-medium">Execution ID / Time</th>
+              <th class="px-6 py-4 font-medium">User Number</th>
+              <th class="px-6 py-4 font-medium">Type / Provider</th>
+              <th class="px-6 py-4 font-medium">Status / Duration</th>
+              <th class="px-6 py-4 font-medium">Hangup By</th>
+              <th class="px-6 py-4 font-medium text-right">Links & Data</th>
+            </tr>
+          </thead>
+          <tbody class="text-sm divide-y divide-slate-100" id="tableBody">
+            <!-- Rows injected by JS -->
+          </tbody>
+        </table>
+
+        <div id="noDataMessage" class="hidden text-center py-16 text-slate-500 bg-white">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-slate-300 mb-4" fill="none"
+            viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <p class="text-lg font-medium text-slate-900 mb-1">No executions found</p>
+          <p class="text-sm">Try adjusting your filters or search query.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transcript Modal -->
+  <div id="transcriptModal"
+    class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex justify-center items-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+        <h3 class="text-lg font-bold text-slate-900">Call Transcript</h3>
+        <button onclick="document.getElementById('transcriptModal').classList.add('hidden')"
+          class="text-slate-400 hover:text-slate-600">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      <div class="p-6 overflow-y-auto flex-1 font-mono text-sm leading-relaxed text-slate-700 whitespace-pre-wrap"
+        id="transcriptContent">
+        <!-- Content injected via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Extracted Data / Analytics Modal -->
+  <div id="analyticsModal"
+    class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex justify-center items-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+        <h3 class="text-lg font-bold text-slate-900">Extracted Analytics</h3>
+        <button onclick="document.getElementById('analyticsModal').classList.add('hidden')"
+          class="text-slate-400 hover:text-slate-600">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      <div class="p-6 overflow-y-auto flex-1 text-sm text-slate-700">
+        <pre id="analyticsContent" class="bg-slate-50 p-4 rounded-lg border border-slate-200 overflow-x-auto"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+
+</html>

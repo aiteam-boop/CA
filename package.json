@@ -1,0 +1,21 @@
+{
+  "name": "calling",
+  "version": "1.0.0",
+  "description": "Simple Bolna calling website",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "npm run dev --prefix client",
+    "build": "cd client && npm run build"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "mongodb": "^7.1.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
