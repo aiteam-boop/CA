@@ -156,15 +156,12 @@ function CellValue({ col, value }) {
 function CallProgressModal({ callState, onClose }) {
   if (!callState) return null;
 
-  const { phase, leadName, error, followUpEntry, aiExtracted, fieldsUpdated } = callState;
+  const { phase, leadName, error, summary, aiExtracted, fieldsUpdated, requirementChanges } = callState;
 
   const steps = [
     { id: 'initiate', label: 'Initiating call with CRM data...' },
-    { id: 'calling', label: 'Call in progress...' },
-    { id: 'transcript', label: 'Retrieving transcript...' },
-    { id: 'storing', label: 'Storing follow-up entry...' },
-    { id: 'extracting', label: 'Extracting updated info...' },
-    { id: 'updating', label: 'Updating lead in MongoDB...' },
+    { id: 'calling', label: 'Call in progress — waiting for completion...' },
+    { id: 'processing', label: 'Processing transcript & updating lead...' },
     { id: 'done', label: 'Complete!' },
   ];
 
@@ -225,10 +222,10 @@ function CallProgressModal({ callState, onClose }) {
 
         {phase === 'done' && (
           <div className="mx-6 mb-4 space-y-3">
-            {followUpEntry && (
+            {summary && (
               <div className="px-4 py-3 bg-green-50 border border-green-200 rounded-xl text-sm">
                 <p className="font-semibold text-green-800 mb-1">✅ Follow-up Entry Stored</p>
-                <p className="text-green-700 text-xs">{followUpEntry.remark?.substring(0, 200)}{followUpEntry.remark?.length > 200 ? '...' : ''}</p>
+                <p className="text-green-700 text-xs whitespace-pre-line">{summary}</p>
               </div>
             )}
             {fieldsUpdated && fieldsUpdated.length > 0 && (
@@ -237,9 +234,22 @@ function CallProgressModal({ callState, onClose }) {
                 <p className="text-blue-700 text-xs">Updated fields: {fieldsUpdated.join(', ')}</p>
               </div>
             )}
+            {requirementChanges && requirementChanges.length > 0 && (
+              <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm">
+                <p className="font-semibold text-amber-800 mb-1">Requirement Changed</p>
+                <div className="text-amber-700 text-xs space-y-0.5">
+                  {requirementChanges.map((c, i) => (
+                    <p key={i}>
+                      {c.old_product && <span>{c.old_product} → {c.new_product}</span>}
+                      {c.old_size && <span>{c.old_size} → {c.new_size}</span>}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
             {aiExtracted && Object.keys(aiExtracted).length > 0 && (
               <div className="px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl text-sm">
-                <p className="font-semibold text-indigo-800 mb-1">🧠 AI Extracted Info</p>
+                <p className="font-semibold text-indigo-800 mb-1">AI Extracted Info</p>
                 <div className="text-indigo-700 text-xs space-y-0.5">
                   {Object.entries(aiExtracted).map(([k, v]) => (
                     <p key={k}><span className="font-medium">{k}:</span> {String(v)}</p>
@@ -279,7 +289,7 @@ function FollowUpHistory({ entries }) {
         </svg>
         Follow-up History
       </h3>
-      <div className="space-y-3 max-h-[250px] overflow-y-auto pr-1">
+      <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
         {sorted.map((entry, i) => (
           <div key={i} className="relative pl-6 pb-3 border-l-2 border-blue-200 last:border-transparent">
             <div className="absolute -left-[5px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-white" />
@@ -289,11 +299,11 @@ function FollowUpHistory({ entries }) {
                   {formatDate(entry.date)}
                 </span>
                 {entry.source && (
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${entry.source === 'ai_call_agent'
-                      ? 'bg-purple-100 text-purple-700'
-                      : 'bg-slate-100 text-slate-600'
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${entry.source === 'AI Call' || entry.source === 'ai_call_agent'
+                    ? 'bg-purple-100 text-purple-700'
+                    : 'bg-slate-100 text-slate-600'
                     }`}>
-                    {entry.source === 'ai_call_agent' ? '🤖 AI Call' : entry.source}
+                    {entry.source === 'ai_call_agent' ? '🤖 AI Call' : entry.source === 'AI Call' ? '🤖 AI Call' : entry.source}
                   </span>
                 )}
                 {entry.stage && (
@@ -302,7 +312,7 @@ function FollowUpHistory({ entries }) {
                   </span>
                 )}
               </div>
-              <p className="text-sm text-slate-700">{entry.remark || '—'}</p>
+              <p className="text-sm text-slate-700 whitespace-pre-line">{entry.remark || '—'}</p>
               {entry.transcript && (
                 <details className="mt-2">
                   <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800 font-medium">
@@ -321,12 +331,141 @@ function FollowUpHistory({ entries }) {
   );
 }
 
+// ── Requirement Change History ────────────────────────────────────────────────
+
+function RequirementChangeHistory({ changes }) {
+  if (!changes || changes.length === 0) return null;
+
+  const sorted = [...changes].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  return (
+    <div className="mt-6">
+      <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide mb-3 flex items-center gap-2">
+        <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+        </svg>
+        Requirement Changes
+      </h3>
+      <div className="space-y-2">
+        {sorted.map((change, i) => (
+          <div key={i} className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+            <div className="shrink-0 w-2 h-2 rounded-full bg-amber-500" />
+            <div className="flex-1">
+              {change.old_product && (
+                <p className="text-amber-800">
+                  <span className="font-medium">Product:</span>{' '}
+                  <span className="line-through text-amber-600">{change.old_product}</span>
+                  {' → '}
+                  <span className="font-semibold text-amber-900">{change.new_product}</span>
+                </p>
+              )}
+              {change.old_size && (
+                <p className="text-amber-800">
+                  <span className="font-medium">Size:</span>{' '}
+                  <span className="line-through text-amber-600">{change.old_size}</span>
+                  {' → '}
+                  <span className="font-semibold text-amber-900">{change.new_size}</span>
+                </p>
+              )}
+            </div>
+            <span className="text-xs text-amber-500 whitespace-nowrap">{formatDate(change.date)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── AI Call Transcripts ──────────────────────────────────────────────────────
+
+function AICallTranscripts({ logs }) {
+  if (!logs || logs.length === 0) return null;
+
+  const sorted = [...logs].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
+
+  return (
+    <div className="mt-6">
+      <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide mb-3 flex items-center gap-2">
+        <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+        </svg>
+        AI Call Transcripts
+      </h3>
+      <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+        {sorted.map((log, i) => (
+          <div key={i} className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-indigo-700">
+                {formatDate(log.date || log.created_at)}
+              </span>
+              {log.recording_url && (
+                <a
+                  href={log.recording_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium hover:bg-indigo-200 transition-colors flex items-center gap-1"
+                >
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Recording
+                </a>
+              )}
+            </div>
+            {/* Summary */}
+            {log.summary && (
+              <div className="mb-2 px-3 py-2 bg-white border border-indigo-100 rounded-lg">
+                <p className="text-xs font-medium text-indigo-800 mb-0.5">Summary</p>
+                <p className="text-xs text-slate-700 whitespace-pre-line">{log.summary}</p>
+              </div>
+            )}
+            {/* Legacy: extracted_data pills */}
+            {!log.summary && log.extracted_data && Object.keys(log.extracted_data).length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {Object.entries(log.extracted_data).filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => (
+                  <span key={k} className="text-xs px-2 py-0.5 rounded bg-white border border-indigo-100 text-indigo-700">
+                    <span className="font-medium">{k}:</span> {String(v)}
+                  </span>
+                ))}
+              </div>
+            )}
+            {/* Legacy: fields_updated */}
+            {log.fields_updated && log.fields_updated.length > 0 && (
+              <div className="mb-2">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium">
+                  Updated: {log.fields_updated.join(', ')}
+                </span>
+              </div>
+            )}
+            {/* Transcript */}
+            {log.transcript && (
+              <details>
+                <summary className="text-xs text-indigo-600 cursor-pointer hover:text-indigo-800 font-medium">
+                  View Full Transcript
+                </summary>
+                <pre className="mt-2 text-xs text-slate-600 bg-white border border-slate-200 rounded-lg p-3 max-h-[150px] overflow-y-auto whitespace-pre-wrap">
+                  {log.transcript}
+                </pre>
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LeadDetailModal({ lead, onClose, onCall }) {
   if (!lead) return null;
 
-  const skipKeys = new Set(['__v', 'follow_up_control']);
+  const skipKeys = new Set(['__v', 'follow_up_control', 'ai_call_logs', 'requirement_change_history', 'ai_calls', 'followup_history', 'last_transcript']);
   const entries = Object.entries(lead).filter(([k]) => !skipKeys.has(k));
-  const followUpEntries = lead.follow_up_control?.entries || [];
+
+  // Read from new fields first, fall back to legacy fields
+  const followUpEntries = lead.followup_history || lead.follow_up_control?.entries || [];
+  const requirementChanges = lead.requirement_change_history || [];
+  const aiCallLogs = lead.ai_calls || lead.ai_call_logs || [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
@@ -371,8 +510,9 @@ function LeadDetailModal({ lead, onClose, onCall }) {
             ))}
           </div>
 
-          {/* Follow-up History Timeline */}
+          <RequirementChangeHistory changes={requirementChanges} />
           <FollowUpHistory entries={followUpEntries} />
+          <AICallTranscripts logs={aiCallLogs} />
         </div>
 
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
@@ -416,14 +556,11 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
   const pollTimerRef = useRef(null);
 
   /**
-   * Full AI calling flow:
+   * Full AI calling flow (hybrid polling):
    * 1. Initiate call with CRM variables
-   * 2. Poll for call completion
-   * 3. Retrieve transcript
-   * 4. Store follow-up entry
-   * 5. Extract info
-   * 6. Update MongoDB
-   * 7. Refresh UI
+   * 2. Poll BOTH: lead document (for webhook) AND Bolna execution API (for call status)
+   * 3. Whichever detects completion first wins
+   * 4. Process transcript, show results, refresh UI
    */
   const handleCall = async (lead) => {
     const phone = lead['Client_Number'];
@@ -432,12 +569,15 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
     const leadName = `${lead['Client_Person_Name'] || ''} – ${lead['Client_Company_Name'] || ''}`.trim();
     const enquiryCode = lead['Enquiry Code'] || '';
 
+    // Snapshot: remember how many ai_calls the lead had before this call
+    const prevAiCallCount = (lead.ai_calls || lead.ai_call_logs || []).length;
+
     setCallingId(lead._id);
     setCallResult(null);
     setCallState({ phase: 'initiate', leadName });
 
     try {
-      // ── Step 1: Initiate the call via backend (which fetches the lead from MongoDB and injects CRM variables) ──
+      // ── Step 1: Initiate the call via backend ──
       const res = await fetch(`${API_BASE}/call`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -476,24 +616,37 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
       setCallResult({ id: lead._id, ok: true, msg: `${typeLabel} call initiated!` });
       setCallState({ phase: 'calling', leadName });
 
-      // ── Step 2: Poll for call completion ──
-      // Wait a bit then poll the execution endpoint to check if the call has ended
-      if (executionId) {
-        setCallState({ phase: 'calling', leadName });
-        const pollResult = await pollForCompletion(executionId);
+      // ── Step 2: Hybrid poll — check both lead (for webhook) AND Bolna (for call status) ──
+      const pollResult = await hybridPoll(enquiryCode, prevAiCallCount, executionId);
 
-        if (pollResult === 'completed' || pollResult === 'timeout') {
-          // ── Step 3-6: Retrieve transcript, store follow-up, extract, update ──
-          setCallState({ phase: 'transcript', leadName });
-          await completeCallFlow(enquiryCode, executionId, leadName);
-        }
+      if (pollResult.source === 'webhook') {
+        // Webhook delivered the transcript — lead already updated
+        setCallState({ phase: 'processing', leadName });
+        await new Promise(r => setTimeout(r, 400));
+
+        const latestAiCall = (pollResult.lead.ai_calls || []).slice(-1)[0] || {};
+        const latestFollowup = (pollResult.lead.followup_history || []).slice(-1)[0] || {};
+
+        setCallState({
+          phase: 'done',
+          leadName,
+          summary: latestAiCall.summary || latestFollowup.remark || 'Transcript processed.',
+          aiExtracted: {},
+          fieldsUpdated: [],
+          requirementChanges: pollResult.lead.requirement_change_history?.slice(-1) || [],
+        });
+
+        fetchLeads(selectedAgent, search);
+
+      } else if (pollResult.source === 'bolna_completed') {
+        // Bolna says call completed — fetch transcript via /api/call/complete
+        setCallState({ phase: 'processing', leadName });
+        await completeCallFlow(enquiryCode, executionId, leadName);
+
       } else {
-        // No execution ID — skip automatic transcript retrieval, still do the complete flow
-        // Wait 60 seconds then run complete without execution_id
-        setCallState({ phase: 'calling', leadName });
-        await new Promise(resolve => setTimeout(resolve, 60000));
-        setCallState({ phase: 'storing', leadName });
-        await completeCallFlow(enquiryCode, null, leadName);
+        // Timeout — try the complete call as last resort
+        setCallState({ phase: 'processing', leadName });
+        await completeCallFlow(enquiryCode, executionId, leadName);
       }
 
     } catch (err) {
@@ -505,45 +658,61 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
   };
 
   /**
-   * Poll Bolna execution endpoint until the call status indicates completion.
+   * Hybrid poll — checks two things on each tick:
+   * 1. Lead document: did ai_calls array grow? (webhook fired)
+   * 2. Bolna execution API: did call status become completed?
+   * Returns { source: 'webhook'|'bolna_completed'|'timeout', lead? }
    */
-  const pollForCompletion = async (executionId) => {
-    const MAX_POLLS = 60;       // Max 5 minutes of polling
-    const POLL_INTERVAL = 5000; // Every 5 seconds
+  const hybridPoll = async (enquiryCode, prevCount, executionId) => {
+    const MAX_POLLS = 60;        // Max 5 minutes
+    const POLL_INTERVAL = 5000;  // Every 5 seconds
 
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+
+      // Check 1: Did the webhook update the lead?
       try {
-        const res = await fetch(`${API_BASE}/execution/${executionId}`);
-        const result = await res.json();
-        if (result.success && result.data) {
-          const execStatus = (result.data.status || '').toLowerCase();
-          if (execStatus === 'completed' || execStatus === 'ended' || execStatus === 'finished' || execStatus === 'done') {
-            return 'completed';
-          }
-          if (execStatus === 'failed' || execStatus === 'error') {
-            return 'completed'; // Still try to get whatever transcript we can
+        const leadRes = await fetch(`${API_BASE}/leads/${encodeURIComponent(enquiryCode)}`);
+        const leadResult = await leadRes.json();
+        if (leadResult.success && leadResult.data) {
+          const currentCount = (leadResult.data.ai_calls || leadResult.data.ai_call_logs || []).length;
+          if (currentCount > prevCount) {
+            return { source: 'webhook', lead: leadResult.data };
           }
         }
-      } catch {
-        // Ignore polling errors, keep trying
+      } catch { /* ignore */ }
+
+      // Check 2: Is the Bolna call completed?
+      if (executionId) {
+        try {
+          const execRes = await fetch(`${API_BASE}/execution/${executionId}`);
+          const execResult = await execRes.json();
+          if (execResult.success && execResult.data) {
+            const execStatus = (execResult.data.status || '').toLowerCase();
+            if (['completed', 'ended', 'finished', 'done'].includes(execStatus)) {
+              return { source: 'bolna_completed' };
+            }
+            if (['failed', 'error'].includes(execStatus)) {
+              return { source: 'bolna_completed' }; // Still try to get transcript
+            }
+          }
+        } catch { /* ignore */ }
       }
     }
-    return 'timeout';
+
+    return { source: 'timeout' };
   };
 
   /**
-   * Call the /api/call/complete endpoint to retrieve transcript, store follow-up,
-   * extract info, and update the lead.
+   * Call /api/call/complete to retrieve transcript from Bolna API,
+   * process it, and update the lead.
    */
   const completeCallFlow = async (enquiryCode, executionId, leadName) => {
     try {
-      setCallState({ phase: 'storing', leadName });
-
       const res = await fetch(`${API_BASE}/call/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enquiry_code: enquiryCode, execution_id: executionId }),
+        body: JSON.stringify({ enquiry_code: enquiryCode, execution_id: executionId || null }),
       });
 
       const result = await res.json();
@@ -552,12 +721,12 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
         setCallState({
           phase: 'done',
           leadName,
-          followUpEntry: result.follow_up_entry,
-          aiExtracted: result.ai_extracted,
-          fieldsUpdated: result.fields_updated,
+          summary: result.summary || 'Call processed.',
+          aiExtracted: result.ai_extracted || {},
+          fieldsUpdated: result.fields_updated || [],
+          requirementChanges: result.requirement_changes || [],
         });
 
-        // Refresh the leads table so the user sees updated data
         fetchLeads(selectedAgent, search);
       } else {
         setCallState({ phase: 'error', leadName, error: result.error || 'Failed to complete call flow.' });
@@ -736,8 +905,8 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
                 {debugInfo.statusBreakdown.map((s) => (
                   <div key={String(s.status)} className="flex items-center justify-between gap-4">
                     <code className={`px-2 py-0.5 rounded font-mono ${String(s.status).toLowerCase() === status.toLowerCase()
-                        ? 'bg-green-100 text-green-700 border border-green-200'
-                        : 'bg-slate-100 text-slate-600'
+                      ? 'bg-green-100 text-green-700 border border-green-200'
+                      : 'bg-slate-100 text-slate-600'
                       }`}>
                       {String(s.status ?? '(null)')}
                     </code>
@@ -788,7 +957,15 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
                           {callingId === String(lead._id) ? 'Calling...' : 'Call'}
                         </button>
                         <button
-                          onClick={() => setViewLead(lead)}
+                          onClick={async () => {
+                            try {
+                              const r = await fetch(`${API_BASE}/leads/${encodeURIComponent(lead['Enquiry Code'])}`);
+                              const d = await r.json();
+                              setViewLead(d.success ? d.data : lead);
+                            } catch {
+                              setViewLead(lead);
+                            }
+                          }}
                           className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
                         >
                           View
