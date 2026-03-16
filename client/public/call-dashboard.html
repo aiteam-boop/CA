@@ -40,36 +40,6 @@
 
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-    <!-- Top Section: Call Card -->
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-8 max-w-lg mx-auto">
-      <div class="text-center mb-6">
-        <h1 class="text-2xl font-bold text-slate-900 mb-2">Connect with us</h1>
-        <p class="text-sm text-slate-500">Enter your phone number and we'll call you instantly via Bolna Voice AI.</p>
-      </div>
-
-      <div class="space-y-4">
-        <div>
-          <label for="phone" class="block text-sm font-medium text-slate-700 mb-1">Phone Number (with country
-            code)</label>
-          <input type="tel" id="phone" value="+919321774772"
-            class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" />
-        </div>
-
-        <div class="hidden">
-          <label for="agentId" class="block text-sm font-medium text-slate-700 mb-1">Agent ID (Optional)</label>
-          <input type="text" id="agentId" placeholder="agent_xyz..."
-            class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" />
-        </div>
-
-        <button id="callButton"
-          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl transition-colors flex justify-center items-center gap-2">
-          <span class="btn-text">Call Now</span>
-          <div class="loader hidden" id="callLoader"></div>
-        </button>
-
-        <div id="statusMessage" class="hidden rounded-xl p-4 text-sm font-medium text-center"></div>
-      </div>
-    </div>
 
     <!-- Dashboard Header -->
     <div class="flex justify-between items-center mb-6">
@@ -85,109 +55,116 @@
     </div>
 
     <!-- Analytics Section -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
       <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-        <div class="text-sm font-medium text-slate-500 mb-1">Total Executions</div>
+        <div class="text-sm font-medium text-slate-500 mb-1">Total Calls</div>
         <div class="text-2xl font-bold text-slate-900" id="statTotalExecutions">-</div>
       </div>
+      <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
+        <div class="text-sm font-medium text-slate-500 mb-2">Call Outcomes</div>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div class="font-semibold text-emerald-600" id="statCompleted">Completed: -</div>
+          <div class="font-semibold text-amber-600" id="statNoAnswer">No Answer: -</div>
+          <div class="font-semibold text-rose-500" id="statBusy">Busy: -</div>
+          <div class="font-semibold text-blue-500" id="statFailed">Failed: -</div>
+        </div>
+      </div>
       <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-        <div class="text-sm font-medium text-slate-500 mb-1">Status Breakdown</div>
-        <div class="text-sm font-semibold text-emerald-600" id="statCompleted">Completed: -</div>
-        <div class="text-sm font-semibold text-blue-600" id="statInProgress">In Progress: -</div>
+        <div class="text-sm font-medium text-slate-500 mb-1">Total Cost</div>
+        <div class="text-2xl font-bold text-slate-900" id="statTotalCost">-</div>
       </div>
       <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-        <div class="text-sm font-medium text-slate-500 mb-1">Total Duration / Avg</div>
-        <div class="text-2xl font-bold text-slate-900">
-          <span id="statTotalDuration">-</span>
-          <span class="text-sm text-slate-500 font-medium ml-1">/ <span id="statAvgDuration">-</span> avg</span>
-        </div>
+        <div class="text-sm font-medium text-slate-500 mb-1">Avg Duration</div>
+        <div class="text-2xl font-bold text-slate-900" id="statAvgDuration">-</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters Section -->
+  <div
+    class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div>
+      <label for="searchId"
+        class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Search</label>
+      <input type="text" id="searchId" placeholder="Search by ID or Number..."
+        class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
+    </div>
+    <div>
+      <label for="filterStatus"
+        class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Status</label>
+      <select id="filterStatus"
+        class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+        <option value="">All Statuses</option>
+        <option value="completed">Completed</option>
+        <option value="in-progress">In Progress</option>
+        <option value="busy">Busy</option>
+        <option value="failed">Failed</option>
+      </select>
+    </div>
+    <div>
+      <label for="filterType" class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Call
+        Type</label>
+      <select id="filterType"
+        class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+        <option value="">All Types</option>
+        <option value="outbound">Outbound</option>
+        <option value="inbound">Inbound</option>
+        <option value="web">Web</option>
+      </select>
+    </div>
+    <div>
+      <label for="filterProvider"
+        class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Provider</label>
+      <select id="filterProvider"
+        class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
+        <option value="">All Providers</option>
+        <option value="twilio">Twilio</option>
+        <option value="vonage">Vonage</option>
+        <option value="plivo">Plivo</option>
+        <option value="exotel">Exotel</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Table Section -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
+    <div id="tableLoader"
+      class="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-10 hidden">
+      <div class="flex flex-col items-center gap-3">
+        <div class="loader" style="width:30px;height:30px;border-width:4px;"></div>
+        <span class="text-sm font-medium text-slate-600">Fetching Data...</span>
       </div>
     </div>
 
-    <!-- Filters Section -->
-    <div
-      class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <div>
-        <label for="searchId"
-          class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Search</label>
-        <input type="text" id="searchId" placeholder="Search by ID or Number..."
-          class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" />
-      </div>
-      <div>
-        <label for="filterStatus"
-          class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Status</label>
-        <select id="filterStatus"
-          class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
-          <option value="">All Statuses</option>
-          <option value="completed">Completed</option>
-          <option value="in-progress">In Progress</option>
-          <option value="busy">Busy</option>
-          <option value="failed">Failed</option>
-        </select>
-      </div>
-      <div>
-        <label for="filterType" class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Call
-          Type</label>
-        <select id="filterType"
-          class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
-          <option value="">All Types</option>
-          <option value="outbound">Outbound</option>
-          <option value="inbound">Inbound</option>
-          <option value="web">Web</option>
-        </select>
-      </div>
-      <div>
-        <label for="filterProvider"
-          class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Provider</label>
-        <select id="filterProvider"
-          class="w-full px-4 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white">
-          <option value="">All Providers</option>
-          <option value="twilio">Twilio</option>
-          <option value="vonage">Vonage</option>
-          <option value="plivo">Plivo</option>
-          <option value="exotel">Exotel</option>
-        </select>
+    <div class="overflow-x-auto overflow-y-auto max-h-[500px]">
+      <table class="w-full text-left border-collapse relative min-w-[900px]">
+        <thead class="sticky top-0 bg-slate-50 z-10 shadow-sm">
+          <tr class="text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
+            <th class="px-6 py-4 font-medium">Time / Execution ID</th>
+            <th class="px-6 py-4 font-medium">Number & Lead Info</th>
+            <th class="px-6 py-4 font-medium">Lead Type / CRM Status</th>
+            <th class="px-6 py-4 font-medium">Duration</th>
+            <th class="px-6 py-4 font-medium">Hangup By</th>
+            <th class="px-6 py-4 font-medium">Cost / Call Outcome</th>
+            <th class="px-6 py-4 font-medium text-right">Links & Data</th>
+          </tr>
+        </thead>
+        <tbody class="text-sm divide-y divide-slate-100" id="tableBody">
+          <!-- Rows injected by JS -->
+        </tbody>
+      </table>
+
+      <div id="noDataMessage" class="hidden text-center py-16 text-slate-500 bg-white">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-slate-300 mb-4" fill="none"
+          viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <p class="text-lg font-medium text-slate-900 mb-1">No executions found</p>
+        <p class="text-sm">Try adjusting your filters or search query.</p>
       </div>
     </div>
-
-    <!-- Table Section -->
-    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden relative">
-      <div id="tableLoader"
-        class="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-10 hidden">
-        <div class="flex flex-col items-center gap-3">
-          <div class="loader" style="width:30px;height:30px;border-width:4px;"></div>
-          <span class="text-sm font-medium text-slate-600">Fetching Data...</span>
-        </div>
-      </div>
-
-      <div class="overflow-x-auto overflow-y-auto max-h-[500px]">
-        <table class="w-full text-left border-collapse relative min-w-[900px]">
-          <thead class="sticky top-0 bg-slate-50 z-10 shadow-sm">
-            <tr class="text-slate-500 text-xs uppercase tracking-wider border-b border-slate-200">
-              <th class="px-6 py-4 font-medium">Execution ID / Time</th>
-              <th class="px-6 py-4 font-medium">User Number</th>
-              <th class="px-6 py-4 font-medium">Type / Provider</th>
-              <th class="px-6 py-4 font-medium">Status / Duration</th>
-              <th class="px-6 py-4 font-medium">Hangup By</th>
-              <th class="px-6 py-4 font-medium text-right">Links & Data</th>
-            </tr>
-          </thead>
-          <tbody class="text-sm divide-y divide-slate-100" id="tableBody">
-            <!-- Rows injected by JS -->
-          </tbody>
-        </table>
-
-        <div id="noDataMessage" class="hidden text-center py-16 text-slate-500 bg-white">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-slate-300 mb-4" fill="none"
-            viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-              d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p class="text-lg font-medium text-slate-900 mb-1">No executions found</p>
-          <p class="text-sm">Try adjusting your filters or search query.</p>
-        </div>
-      </div>
-    </div>
+  </div>
   </div>
 
   <!-- Transcript Modal -->
@@ -229,6 +206,7 @@
     </div>
   </div>
 
+  <script src="/socket.io/socket.io.js"></script>
   <script src="script.js"></script>
 </body>
 

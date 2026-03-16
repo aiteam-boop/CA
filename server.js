@@ -3,17 +3,24 @@ const cors = require('cors');
 const path = require('path');
 const { MongoClient } = require('mongodb');
 
+// Set up socket.io
+const http = require('http');
+const { Server } = require('socket.io');
+
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(express.static('public'));
 app.use(express.json());
 app.use(cors());
 
 const BOLNA_API_KEY = process.env.BOLNA_API_KEY;
-const BOLNA_API_URL = 'https://api.bolna.dev/call';
+const BOLNA_API_URL = process.env.BOLNA_API_URL || 'https://api.bolna.ai/call';
 const BOLNA_FROM_NUMBER = process.env.BOLNA_FROM_NUMBER || null;
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -157,11 +164,13 @@ const STAGE_AGENT_MAP = {
     mql: process.env.MQL_CALL_AGENT_ID || process.env.AGENT_ID,
     sql: process.env.SQL_CALL_AGENT_ID || process.env.AGENT_ID,
     followup: process.env.FOLLOWUP_CALL_AGENT_ID || process.env.AGENT_ID,
+    potential: process.env.Potential_CALL || process.env.AGENT_ID,
 };
 
 function resolveCallType(status) {
     if (!status) return 'fresh';
     const s = status.toLowerCase().replace(/[\s_\-/]+/g, '');
+    if (s === 'potential') return 'potential';
     if (s === 'srfmql' || s === 'mql') return 'mql';
     if (s === 'sql') return 'sql';
     if (s.startsWith('follow')) return 'followup';
@@ -176,6 +185,7 @@ function resolveCallType(status) {
 function getAgentIdByStatus(status) {
     if (!status) return STAGE_AGENT_MAP.fresh;
     const s = status.toLowerCase().replace(/[\s_\-/]+/g, '');
+    if (s === 'potential') return STAGE_AGENT_MAP.potential;
     if (s.startsWith('follow')) return STAGE_AGENT_MAP.followup;
     if (s === 'srfmql' || s === 'mql') return STAGE_AGENT_MAP.mql;
     if (s === 'sql') return STAGE_AGENT_MAP.sql;
@@ -284,6 +294,7 @@ app.post('/api/call', async (req, res) => {
         const bolnaPayload = {
             agent_id,
             recipient_phone_number,
+            phone_number: recipient_phone_number, // Added for newer .ai API support
             user_data: {
                 // Primary CRM variables the agent prompt references
                 name: leadContext.contact_name || '',
@@ -316,22 +327,86 @@ app.post('/api/call', async (req, res) => {
         console.log(`Context:   ${callContext}`);
         console.log(`========================\n`);
 
-        const response = await fetch(BOLNA_API_URL, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${BOLNA_API_KEY}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(bolnaPayload),
-        });
+        // Record initiation in lead document history immediately
+        if (dbLead) {
+            await collection.updateOne(
+                { 'Enquiry Code': enquiryCode },
+                {
+                    $push: {
+                        ai_calls: {
+                            date: new Date(),
+                            call_type: callType.toUpperCase(),
+                            call_status: 'Initiated',
+                            summary: 'AI Call initiated by system...',
+                            recording_url: null,
+                            transcript: null
+                        }
+                    }
+                }
+            ).catch(err => console.error('Failed to log initiation to lead:', err.message));
+        }
 
-        let data;
-        const rawText = await response.text();
-        try {
-            data = JSON.parse(rawText);
-        } catch {
-            console.error('Bolna returned non-JSON:', rawText);
-            data = { message: rawText || 'Bolna returned an invalid response' };
+        const url = BOLNA_API_URL;
+        let response = null;
+        let data = null;
+        let lastErrorMsg = '';
+
+        // Added Retry Logic for 502 / 504 Gateway errors
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                // Implementing abort controller for timeout control (30 seconds)
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+                response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${BOLNA_API_KEY}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(bolnaPayload),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                const rawText = await response.text();
+                lastErrorMsg = rawText;
+
+                // Check for HTML Gateway error replies before JSON parsing
+                if (rawText.trim().toLowerCase().startsWith('<!doctype') || rawText.trim().toLowerCase().startsWith('<html')) {
+                    console.error(`Bolna Gateway Error (Attempt ${attempt}): Received HTML instead of JSON:`, rawText.substring(0, 100));
+                    throw new Error("Received HTML error from Bolna gateway");
+                }
+
+                try {
+                    data = JSON.parse(rawText);
+                } catch {
+                    throw new Error(`Invalid JSON format from Bolna: ${rawText.substring(0, 100)}`);
+                }
+
+                // If response is OK, break the retry loop early
+                if (response.ok) {
+                    break;
+                } else if (response.status >= 500) {
+                    // Force retry on 50x errors
+                    throw new Error(`Bolna Server Error: ${response.status}`);
+                } else {
+                    // 4xx client errors shouldn't be retried
+                    break;
+                }
+
+            } catch (err) {
+                console.log(`[Bolna Call] Try ${attempt} Failed: ${err.message}`);
+                if (attempt < 3) {
+                    await new Promise(r => setTimeout(r, 2000)); // wait 2 seconds before retry
+                }
+            }
+        }
+
+        // If 'data' is still null, it completely failed all retries
+        if (!data) {
+            data = { message: `Bolna failed after retries. Last error: ${lastErrorMsg.substring(0, 50)}...` };
         }
 
         try {
@@ -344,16 +419,16 @@ app.post('/api/call', async (req, res) => {
                 recipient_phone: recipient_phone_number,
                 lead_context: leadContext,
                 variables_sent: bolnaPayload.user_data,
-                call_status: response.ok ? 'initiated' : 'failed',
+                call_status: (response && response.ok) ? 'initiated' : 'failed',
                 bolna_response: data,
             });
         } catch (logErr) {
             console.error('Failed to write call log:', logErr.message);
         }
 
-        if (!response.ok) {
-            console.error('Bolna API Error:', data);
-            return res.status(response.status).json({ success: false, error: data.message || 'Call failed' });
+        if (!response || !response.ok) {
+            console.error('Bolna API Error finalized as failed:', data);
+            return res.status(response ? response.status : 502).json({ success: false, error: data.message || 'Call failed due to Bolna gateway error' });
         }
 
         res.json({
@@ -380,7 +455,7 @@ app.get('/api/execution/:executionId', async (req, res) => {
     }
 
     try {
-        const response = await fetch(`https://api.bolna.dev/v2/executions/${executionId}`, {
+        const response = await fetch(`https://api.bolna.ai/executions/${executionId}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${BOLNA_API_KEY}`,
@@ -412,11 +487,11 @@ app.get('/api/execution/:executionId', async (req, res) => {
 // Helper: tries to get the transcript from Bolna with retries (it may not be
 // available immediately after the call ends).
 
-async function fetchTranscriptFromBolna(executionId, retries = 3, delayMs = 5000) {
+async function fetchTranscriptFromBolna(executionId, retries = 12, delayMs = 5000) {
     for (let attempt = 1; attempt <= retries; attempt++) {
         try {
             // Try single execution detail endpoint first
-            const execResponse = await fetch(`https://api.bolna.dev/v2/executions/${executionId}`, {
+            const execResponse = await fetch(`https://api.bolna.ai/executions/${executionId}`, {
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${BOLNA_API_KEY}`,
@@ -482,10 +557,16 @@ async function fetchTranscriptFromBolna(executionId, retries = 3, delayMs = 5000
                 || entry.call_details?.recording_url
                 || null;
 
+            const duration = entry.conversation_duration || entry.duration || entry.conversation_time || entry.telephony_data?.duration || 0;
+            const status = entry.status || entry.call_status || entry.smart_status || 'completed';
+            const callType = entry.conversation_type || entry.call_type || 'OUTBOUND';
+            const hangupBy = entry.telephony_data?.hangup_by || entry.hangup_by || 'Unknown';
+            const cost = entry.cost || entry.total_cost || entry.callCost || 0.00;
+
             console.log(`[Bolna Fetch] Attempt ${attempt}: transcript ${transcript.length} chars, summary ${summary.length} chars, recording: ${recordingUrl ? 'yes' : 'no'}`);
 
             if (transcript.length >= 20) {
-                return { transcript, summary, recordingUrl };
+                return { transcript, summary, recordingUrl, duration, status, callType, hangupBy, cost };
             }
 
             // Transcript too short — log raw response and retry
@@ -499,7 +580,7 @@ async function fetchTranscriptFromBolna(executionId, retries = 3, delayMs = 5000
             if (attempt < retries) await new Promise(r => setTimeout(r, delayMs));
         }
     }
-    return { transcript: '', summary: '', recordingUrl: null };
+    return { transcript: '', summary: '', recordingUrl: null, duration: 0, status: 'failed', callType: 'OUTBOUND', hangupBy: 'Unknown', cost: 0.00 };
 }
 
 // ── Call Complete: Retrieve transcript → Extract → Update lead ────────────────
@@ -525,13 +606,23 @@ app.post('/api/call/complete', async (req, res) => {
         let transcript = '';
         let recordingUrl = null;
         let bolnaSummary = '';
+        let duration = 0;
+        let status = 'completed';
+        let callType = 'OUTBOUND';
+        let hangupBy = 'Unknown';
+        let cost = 0.00;
 
         if (execution_id) {
             console.log(`[Call Complete] Fetching transcript for execution ${execution_id} (with retries)...`);
-            const result = await fetchTranscriptFromBolna(execution_id, 3, 5000);
+            const result = await fetchTranscriptFromBolna(execution_id, 12, 5000);
             transcript = result.transcript;
             recordingUrl = result.recordingUrl;
             bolnaSummary = result.summary || '';
+            duration = result.duration || 0;
+            status = result.status || 'completed';
+            callType = result.callType || 'OUTBOUND';
+            hangupBy = result.hangupBy || 'Unknown';
+            cost = result.cost || 0.00;
         }
 
         console.log(`[Call Complete] ${enquiry_code}: transcript retrieved (${transcript.length} chars)`);
@@ -540,15 +631,22 @@ app.post('/api/call/complete', async (req, res) => {
             // No meaningful transcript — store minimal entries in new fields
             const minimalAiCall = {
                 date: new Date(),
+                call_type: callType,
+                duration: duration,
                 transcript: '',
                 summary: 'AI call completed – no transcript available.',
                 recording_url: recordingUrl,
+                call_status: status,
+                hangup_by: hangupBy,
+                cost: cost,
             };
             const minimalFollowup = {
                 date: new Date(),
                 source: 'AI Call',
                 stage: lead.Status || 'Follow Up',
                 remark: 'AI call completed – no transcript available.',
+                transcript: '',
+                recording_url: recordingUrl,
             };
 
             await collection.updateOne(
@@ -562,6 +660,10 @@ app.post('/api/call/complete', async (req, res) => {
             );
 
             const updatedLead = await collection.findOne({ 'Enquiry Code': enquiry_code });
+
+            // Emit socket event to update frontend dashboards without page reload
+            io.emit('call_completed', { enquiry_code });
+
             return res.json({
                 success: true,
                 message: 'Call completed – no transcript to process.',
@@ -574,8 +676,11 @@ app.post('/api/call/complete', async (req, res) => {
         }
 
         // Run the full extraction → change detection → update pipeline
-        const result = await processTranscriptAndUpdateLead(lead, transcript, database, recordingUrl, bolnaSummary);
+        const result = await processTranscriptAndUpdateLead(lead, transcript, database, recordingUrl, bolnaSummary, { duration, status, callType, hangupBy, cost });
         const updatedLead = await collection.findOne({ 'Enquiry Code': enquiry_code });
+
+        // Emit socket event to update frontend dashboards without page reload
+        io.emit('call_completed', { enquiry_code });
 
         res.json({
             success: true,
@@ -698,7 +803,7 @@ function generateSummary(extracted, changes, lead) {
  * Writes to: last_transcript, ai_calls[], followup_history[]
  * Used by both the Bolna webhook and the /api/call/complete endpoint.
  */
-async function processTranscriptAndUpdateLead(lead, transcript, database, recordingUrl, bolnaSummary) {
+async function processTranscriptAndUpdateLead(lead, transcript, database, recordingUrl, bolnaSummary, extraInfo = {}) {
     const collection = database.collection('leads_master');
     const enquiryCode = lead['Enquiry Code'];
 
@@ -750,9 +855,14 @@ async function processTranscriptAndUpdateLead(lead, transcript, database, record
     // Step 5: Build ai_calls entry
     const aiCallEntry = {
         date: new Date(),
+        call_type: extraInfo.callType || 'OUTBOUND',
+        duration: extraInfo.duration || 0,
         transcript,
         summary,
         recording_url: recordingUrl || null,
+        call_status: extraInfo.status || 'completed',
+        hangup_by: extraInfo.hangupBy || 'Unknown',
+        cost: extraInfo.cost || 0.00,
     };
 
     // Step 6: Build followup_history entry
@@ -761,6 +871,8 @@ async function processTranscriptAndUpdateLead(lead, transcript, database, record
         source: 'AI Call',
         stage,
         remark: summary,
+        transcript,
+        recording_url: recordingUrl || null,
     };
 
     // Step 7: Persist last_transcript at top level
@@ -832,8 +944,19 @@ app.post('/api/bolna/call-webhook', async (req, res) => {
 
         console.log(`[Bolna Webhook] Lead matched: ${lead['Enquiry Code']} – ${lead.Client_Company_Name}`);
 
-        const result = await processTranscriptAndUpdateLead(lead, transcript, database, recording_url || null);
+        const extraOptions = {
+            duration: req.body.duration || req.body.conversation_duration || 0,
+            status: req.body.status || req.body.call_status || 'completed',
+            callType: req.body.call_type || req.body.conversation_type || 'OUTBOUND',
+            hangupBy: req.body.hangup_by || req.body.telephony_data?.hangup_by || 'Unknown',
+            cost: req.body.cost || req.body.total_cost || 0.00
+        };
+
+        const result = await processTranscriptAndUpdateLead(lead, transcript, database, recording_url || null, null, extraOptions);
         const updatedLead = await collection.findOne({ 'Enquiry Code': lead['Enquiry Code'] });
+
+        // Emit socket event for frontend Dashboard update
+        io.emit('call_completed', { enquiry_code: lead['Enquiry Code'] });
 
         res.json({
             success: true,
@@ -954,62 +1077,98 @@ app.get('/api/leads/:enquiryCode', async (req, res) => {
     }
 });
 
-// ── Bolna executions ─────────────────────────────────────────────────────────
-
-const COST_KEYS = new Set(['cost', 'total_cost', 'avgCost', 'callCost', 'totalCost']);
-
-function stripCostFromObject(obj) {
-    if (obj === null || typeof obj !== 'object') return obj;
-    if (Array.isArray(obj)) return obj.map(stripCostFromObject);
-    const out = {};
-    for (const [k, v] of Object.entries(obj)) {
-        if (COST_KEYS.has(k)) continue;
-        out[k] = stripCostFromObject(v);
-    }
-    return out;
-}
+let cacheExecutions = { data: null, timestamp: 0 };
 
 app.get('/api/executions', async (req, res) => {
-    const agent_id = req.query.agent_id || process.env.AGENT_ID;
-
-    if (!agent_id) {
-        return res.status(400).json({ success: false, error: 'Agent ID is required (set AGENT_ID in .env or pass it).' });
-    }
-
     try {
-        const response = await fetch(`https://api.bolna.dev/v2/agent/${agent_id}/executions`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${BOLNA_API_KEY}`,
-                'Content-Type': 'application/json',
+        const database = await connectDB();
+
+        if (cacheExecutions.data && Date.now() - cacheExecutions.timestamp < 10000 && !req.query.forceRefresh) {
+            return res.json({ success: true, data: cacheExecutions.data });
+        }
+
+        const limit = parseInt(req.query.limit, 10) || 50;
+
+        const pipeline = [
+            { $sort: { call_time: -1 } },
+            { $limit: limit },
+            {
+                $lookup: {
+                    from: "leads_master",
+                    localField: "lead_enquiry_code",
+                    foreignField: "Enquiry Code",
+                    as: "lead_info"
+                }
             },
+            { $unwind: { path: "$lead_info", preserveNullAndEmptyArrays: true } }
+        ];
+
+        const results = await database.collection('call_logs').aggregate(pipeline).toArray();
+
+        const mappedResults = results.map(r => {
+            let aiCall = null;
+            if (r.lead_info && r.lead_info.ai_calls) {
+                const logTime = new Date(r.call_time).getTime();
+                // Find nearest ai_call within 15 mins after call initiation
+                aiCall = r.lead_info.ai_calls.find(c => {
+                    const cTime = new Date(c.date).getTime();
+                    return cTime >= logTime - 60000 && cTime <= logTime + 15 * 60000;
+                });
+            }
+
+            const status = aiCall ? aiCall.call_status : (r.call_status || 'Initiated');
+            // Provide a composite ID so transcript fetcher can look it up correctly
+            const compositeId = `${r.lead_enquiry_code}::${aiCall ? new Date(aiCall.date).toISOString() : new Date(r.call_time).toISOString()}`;
+
+            return {
+                id: compositeId,
+                status: status || 'Completed',
+                user_number: r.recipient_phone || 'N/A',
+                conversation_type: r.call_type || 'OUTBOUND',
+                created_at: r.call_time,
+                duration: aiCall ? aiCall.duration : 0,
+                recording_url: aiCall ? aiCall.recording_url : null,
+                telephony_data: {
+                    hangup_by: aiCall ? aiCall.hangup_by : 'Unknown',
+                    duration: aiCall ? aiCall.duration : 0,
+                },
+                cost: aiCall ? (aiCall.cost || 0.00) : 0.00,
+                has_transcript: !!(aiCall && aiCall.transcript && aiCall.transcript.length > 20),
+                extracted_data: (aiCall && aiCall.summary) ? { summary: aiCall.summary } : {},
+                lead_code: r.lead_enquiry_code,
+                lead_status: r.lead_info ? r.lead_info.Status : 'Unknown',
+                lead_name: r.lead_context ? r.lead_context.company_name : 'Unknown'
+            };
         });
 
-        let data;
-        const rawText = await response.text();
-        try {
-            data = JSON.parse(rawText);
-        } catch {
-            console.error('Bolna executions returned non-JSON:', rawText.substring(0, 200));
-            data = { message: rawText || 'Bolna returned an invalid response' };
-        }
-
-        console.log(`\n=== BOLNA API RAW DATA (Agent: ${agent_id}) ===`);
-        console.log(JSON.stringify(data, null, 2).substring(0, 2000));
-        console.log(`=============================================\n`);
-
-        if (!response.ok) {
-            console.error('Bolna API Error:', data);
-            return res.status(response.status).json({ success: false, error: data.message || 'Failed to fetch executions' });
-        }
-
-        res.json({ success: true, data: stripCostFromObject(data) });
+        cacheExecutions = { data: mappedResults, timestamp: Date.now() };
+        res.json({ success: true, data: mappedResults });
     } catch (error) {
-        console.error('Server Error:', error);
-        res.status(500).json({ success: false, error: 'Internal server error while fetching from Bolna.' });
+        console.error('Executions fetch error:', error);
+        res.status(500).json({ success: false, error: 'Internal server error.' });
     }
 });
 
-app.listen(PORT, () => {
+// Lazy load transcript
+app.get('/api/transcript/:id', async (req, res) => {
+    try {
+        const [leadCode, dateStr] = req.params.id.split('::');
+        if (!leadCode || !dateStr) return res.status(400).json({ error: 'Invalid ID' });
+
+        const database = await connectDB();
+        const lead = await database.collection('leads_master').findOne({ 'Enquiry Code': leadCode });
+        if (!lead || !lead.ai_calls) return res.status(404).json({ error: 'Not found' });
+
+        // Find the matching AI call by date
+        const call = lead.ai_calls.find(c => String(c.date) === dateStr || new Date(c.date).toISOString() === dateStr || Math.abs(new Date(c.date).getTime() - new Date(dateStr).getTime()) < 60000);
+        if (!call || !call.transcript) return res.status(404).json({ error: 'Call or transcript not found' });
+
+        res.json({ success: true, transcript: call.transcript || '' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+server.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });

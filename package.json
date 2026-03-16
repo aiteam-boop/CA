@@ -13,7 +13,10 @@
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
     "mongodb": "^7.1.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "nodemon": "^3.1.14",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

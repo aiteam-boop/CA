@@ -1,19 +1,21 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // UI Elements
-    const callButton = document.getElementById('callButton');
-    const phoneInput = document.getElementById('phone');
-    const agentIdInput = document.getElementById('agentId');
-    const btnText = document.querySelector('.btn-text');
-    const callLoader = document.getElementById('callLoader');
-    const statusMessage = document.getElementById('statusMessage');
+    // Socket.io initialization
+    try {
+        const socket = io();
+        socket.on('call_completed', () => {
+            console.log('Call completed event received, auto-refreshing dashboard...');
+            fetchExecutions();
+        });
+    } catch (err) {
+        console.warn('Socket.io failed to initialize:', err);
+    }
+
     const refreshBtn = document.getElementById('refreshBtn');
 
     // Analytics Elements
     const statTotalExecutions = document.getElementById('statTotalExecutions');
-    const statCompleted = document.getElementById('statCompleted');
-    const statInProgress = document.getElementById('statInProgress');
-    const statTotalDuration = document.getElementById('statTotalDuration');
     const statAvgDuration = document.getElementById('statAvgDuration');
+    const statTotalCost = document.getElementById('statTotalCost');
 
     // Filter Elements
     const searchId = document.getElementById('searchId');
@@ -27,73 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const noDataMessage = document.getElementById('noDataMessage');
 
     let allExecutions = [];
-
-    // --- Initiation Call Logic ---
-    const showStatus = (message, type) => {
-        statusMessage.textContent = message;
-        statusMessage.className = `p-4 rounded-xl text-sm font-medium text-center ${type === 'success' ? 'bg-emerald-50 text-emerald-600 border border-emerald-200' : 'bg-red-50 text-red-600 border border-red-200'
-            }`;
-        statusMessage.classList.remove('hidden');
-
-        // Auto-hide after 5 seconds
-        setTimeout(() => {
-            statusMessage.classList.add('hidden');
-        }, 5000);
-    };
-
-    const setLoading = (isLoading) => {
-        if (isLoading) {
-            callButton.disabled = true;
-            callButton.classList.add('opacity-75', 'cursor-not-allowed');
-            btnText.classList.add('hidden');
-            callLoader.classList.remove('hidden');
-        } else {
-            callButton.disabled = false;
-            callButton.classList.remove('opacity-75', 'cursor-not-allowed');
-            btnText.classList.remove('hidden');
-            callLoader.classList.add('hidden');
-        }
-    };
-
-    callButton.addEventListener('click', async () => {
-        const phoneNumber = phoneInput.value.trim();
-        const agentId = agentIdInput.value.trim();
-
-        if (!phoneNumber) {
-            showStatus('Please enter a valid phone number.', 'error');
-            phoneInput.focus();
-            return;
-        }
-
-        setLoading(true);
-        statusMessage.classList.add('hidden');
-
-        try {
-            const response = await fetch('/api/call', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    recipient_phone_number: phoneNumber,
-                    agent_id: agentId || undefined
-                })
-            });
-
-            const data = await response.json();
-
-            if (response.ok && data.success) {
-                showStatus('Call initiated successfully! Your phone should ring soon.', 'success');
-                // Auto refresh executions after a brief delay
-                setTimeout(fetchExecutions, 2000);
-            } else {
-                showStatus(`Failed to initiate call: ${data.error || 'Unknown error'}`, 'error');
-            }
-        } catch (error) {
-            console.error('Error triggering call:', error);
-            showStatus('Network error. Please try again later.', 'error');
-        } finally {
-            setLoading(false);
-        }
-    });
 
     // --- Execution Data Logic ---
     const formatDuration = (seconds) => {
@@ -111,9 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fetchExecutions = async () => {
         tableLoader.classList.remove('hidden');
-        const agentId = agentIdInput.value.trim();
         let url = '/api/executions';
-        if (agentId) url += `?agent_id=${agentId}`;
 
         try {
             const response = await fetch(url);
@@ -157,27 +90,37 @@ document.addEventListener('DOMContentLoaded', () => {
         statTotalExecutions.textContent = allExecutions.length;
 
         let completed = 0;
-        let inProgress = 0;
+        let noAnswer = 0;
+        let busy = 0;
+        let failed = 0;
         let totalDuration = 0;
+        let totalCost = 0;
 
         allExecutions.forEach(exec => {
             const status = (exec.status || exec.smart_status || exec.call_status || '').toLowerCase();
-            if (status === 'completed') completed++;
-            else if (status === 'in_progress' || status === 'in-progress' || status === 'queued' || status === 'busy') inProgress++;
+            if (status.includes('completed')) completed++;
+            else if (status.includes('no-answer') || status.includes('no answer') || status === 'unanswered' || status.includes('timeout')) noAnswer++;
+            else if (status.includes('busy')) busy++;
+            else if (status.includes('failed') || status.includes('error')) failed++;
 
-            if (exec.conversation_duration) {
-                totalDuration += parseFloat(exec.conversation_duration);
-            } else if (exec.conversation_time || exec.duration) {
-                totalDuration += parseFloat(exec.conversation_time || exec.duration);
+            if (exec.duration || exec.telephony_data?.duration) {
+                totalDuration += parseFloat(exec.telephony_data?.duration || exec.duration || 0);
+            }
+            if (exec.cost) {
+                totalCost += parseFloat(exec.cost);
             }
         });
 
-        statCompleted.textContent = `Completed: ${completed}`;
-        statInProgress.textContent = `In Progress: ${inProgress}`;
+        document.getElementById('statCompleted').textContent = `Completed: ${completed}`;
+        document.getElementById('statNoAnswer').textContent = `No Answer: ${noAnswer}`;
+        document.getElementById('statBusy').textContent = `Busy: ${busy}`;
+        document.getElementById('statFailed').textContent = `Failed: ${failed}`;
 
-        statTotalDuration.textContent = formatDuration(totalDuration);
+        // Convert USD cost assuming ₹83 per USD as requested
+        if (statTotalCost) statTotalCost.textContent = `₹${(totalCost * 83).toFixed(2)}`;
+
         const avgDur = allExecutions.length ? (totalDuration / allExecutions.length) : 0;
-        statAvgDuration.textContent = formatDuration(avgDur);
+        if (statAvgDuration) statAvgDuration.textContent = formatDuration(avgDur);
     };
 
     const renderTable = () => {
@@ -188,13 +131,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const fProvider = filterProvider.value.toLowerCase();
 
         const filtered = allExecutions.filter(exec => {
-            const execId = (exec.id || exec.execution_id || '').toLowerCase();
-            const number = (exec.user_number || exec.recipient_phone_number || '').toLowerCase();
-            const status = (exec.status || exec.call_status || '').toLowerCase();
-            const type = (exec.conversation_type || exec.call_type || '').toLowerCase();
-            const provider = (exec.provider || '').toLowerCase();
+            const execId = (exec.id || '').toLowerCase();
+            const number = (exec.user_number || '').toLowerCase();
+            const leadName = (exec.lead_name || '').toLowerCase();
+            const leadCode = (exec.lead_code || '').toLowerCase();
+            const status = (exec.status || '').toLowerCase();
+            const type = (exec.conversation_type || '').toLowerCase();
 
-            const matchesSearch = execId.includes(sQuery) || number.includes(sQuery);
+            const matchesSearch = execId.includes(sQuery) ||
+                number.includes(sQuery) ||
+                leadName.includes(sQuery) ||
+                leadCode.includes(sQuery);
             const matchesStatus = !fStatus || status === fStatus || (fStatus === 'in-progress' && status === 'queued');
             const matchesType = !fType || type.includes(fType);
             const matchesProvider = !fProvider || provider.includes(fProvider);
@@ -221,33 +168,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 // We safely access items considering varying bolna API versions
                 tr.innerHTML = `
                     <td class="px-6 py-4">
-                        <div class="font-medium text-slate-900">${(ex.id || ex.execution_id || 'N/A').substring(0, 15)}...</div>
+                        <div class="font-medium text-slate-900">${(ex.id || 'N/A').substring(0, 15)}...</div>
                         <div class="text-xs text-slate-500 mt-1">${formatDate(created)}</div>
                     </td>
-                    <td class="px-6 py-4 font-medium">${ex.user_number || ex.recipient_phone_number || 'N/A'}</td>
+                    <td class="px-6 py-4">
+                        <div class="text-[11px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded inline-block mb-1">${ex.lead_code || 'N/A'}</div>
+                        <div class="text-xs font-semibold text-slate-700 mt-0.5 flex items-center gap-1">📞 ${ex.user_number || 'N/A'}</div>
+                        <div class="text-xs text-slate-500 mt-1 font-medium truncate max-w-[150px]">${ex.lead_name || 'N/A'}</div>
+                    </td>
                     <td class="px-6 py-4">
                         <div class="uppercase text-xs font-semibold text-slate-500 tracking-wider">
                             ${ex.conversation_type || ex.call_type || 'OUTBOUND'}
                         </div>
-                        <div class="text-xs text-slate-400 mt-1 capitalize">
-                            ${ex.provider || 'unknown provider'}
+                        <div class="text-xs font-medium text-slate-500 mt-1 capitalize p-1 bg-slate-100 rounded inline-block">
+                            ${ex.lead_status || 'Status Unknown'}
                         </div>
                     </td>
                     <td class="px-6 py-4">
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${statusColor}">
-                            ${statusStr}
-                        </span>
-                        <div class="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            ${formatDuration(ex.conversation_duration || ex.conversation_time || ex.duration || ex.telephony_data?.duration)}
+                        <div class="text-sm font-semibold text-slate-800 flex items-center gap-1">
+                            <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            ${ex.telephony_data?.duration || ex.conversation_duration || ex.duration || '0.0'}
                         </div>
                     </td>
-                    <td class="px-6 py-4 text-sm text-slate-600 capitalize">
+                    <td class="px-6 py-4 text-sm font-medium text-slate-600 capitalize">
                         ${ex.telephony_data?.hangup_by || ex.hangup_by || 'Unknown'}
                     </td>
+                    <td class="px-6 py-4">
+                        <div class="text-sm font-semibold text-slate-900 mb-1">
+                            ₹${(parseFloat(ex.cost || 0.00) * 83).toFixed(2)}
+                        </div>
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${statusColor}">
+                            ${statusStr}
+                        </span>
+                    </td>
                     <td class="px-6 py-4 text-right text-sm space-y-1">
-                        ${(ex.telephony_data?.recording_url || ex.recording_url) ? `<a href="${ex.telephony_data?.recording_url || ex.recording_url}" target="_blank" class="block text-blue-600 hover:underline">🔊 Audio</a>` : '<span class="block text-slate-300">No Audio</span>'}
-                        ${ex.transcript ? `<button class="block ml-auto text-blue-600 hover:underline text-left mt-1 font-medium" onclick="window.showTranscript('${ex.id || ex.execution_id}')">📄 Transcript</button>` : ''}
+                        ${(ex.recording_url) ? `<a href="${ex.recording_url}" target="_blank" class="block text-blue-600 hover:underline">🔊 Audio</a>` : '<span class="block text-slate-300">No Audio</span>'}
+                        ${ex.has_transcript ? `<button class="block ml-auto text-blue-600 hover:underline text-left mt-1 font-medium" onclick="window.showTranscript('${ex.id || ex.execution_id}')">📄 Transcript</button>` : ''}
                         ${(ex.extracted_data && Object.keys(ex.extracted_data).length > 0) ? `<button class="block ml-auto text-purple-600 hover:underline text-left mt-1 font-medium" onclick="window.showAnalytics('${ex.id || ex.execution_id}')">📊 Analytics</button>` : ''}
                         <button class="block ml-auto text-slate-400 hover:text-slate-800 text-left mt-1 text-xs" onclick="console.log(${JSON.stringify(ex).replace(/"/g, '&quot;')}); alert('Check Developer Console For Raw JSON')">Raw JSON</button>
                     </td>
@@ -278,11 +234,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Global Modal Handlers setup ---
-    window.showTranscript = (id) => {
+    window.showTranscript = async (id) => {
         const row = allExecutions.find(e => (e.id === id || e.execution_id === id));
-        if (row && row.transcript) {
-            document.getElementById('transcriptContent').textContent = row.transcript;
+        if (row && row.has_transcript) {
+            const transcriptContent = document.getElementById('transcriptContent');
+            transcriptContent.textContent = 'Loading transcript...';
             document.getElementById('transcriptModal').classList.remove('hidden');
+
+            try {
+                const res = await fetch(`/api/transcript/${id}`);
+                const data = await res.json();
+                if (data.success) {
+                    transcriptContent.textContent = data.transcript;
+                } else {
+                    transcriptContent.textContent = data.error || 'Failed to load transcript.';
+                }
+            } catch (err) {
+                transcriptContent.textContent = 'Error loading transcript.';
+            }
         }
     };
 

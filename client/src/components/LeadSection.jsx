@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { io } from 'socket.io-client';
 
 const API_BASE = '/api';
 
@@ -151,128 +152,6 @@ function CellValue({ col, value }) {
   return <span>{value ?? '—'}</span>;
 }
 
-// ── Call Progress Modal ─────────────────────────────────────────────────────
-
-function CallProgressModal({ callState, onClose }) {
-  if (!callState) return null;
-
-  const { phase, leadName, error, summary, aiExtracted, fieldsUpdated, requirementChanges } = callState;
-
-  const steps = [
-    { id: 'initiate', label: 'Initiating call with CRM data...' },
-    { id: 'calling', label: 'Call in progress — waiting for completion...' },
-    { id: 'processing', label: 'Processing transcript & updating lead...' },
-    { id: 'done', label: 'Complete!' },
-  ];
-
-  const phaseIndex = steps.findIndex(s => s.id === phase);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-blue-50 to-indigo-50">
-          <h3 className="text-lg font-bold text-slate-900">AI Call Progress</h3>
-          <p className="text-sm text-slate-500 mt-0.5">{leadName || 'Processing...'}</p>
-        </div>
-
-        <div className="px-6 py-5 space-y-3">
-          {steps.map((step, i) => {
-            const isActive = step.id === phase;
-            const isDone = i < phaseIndex || phase === 'done';
-            const isPending = i > phaseIndex && phase !== 'done';
-            const isError = phase === 'error' && i === phaseIndex;
-
-            return (
-              <div key={step.id} className="flex items-center gap-3">
-                {isDone && (
-                  <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0">
-                    <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                )}
-                {isActive && !isError && (
-                  <div className="w-6 h-6 rounded-full border-2 border-blue-500 flex items-center justify-center shrink-0">
-                    <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
-                  </div>
-                )}
-                {isError && (
-                  <div className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center shrink-0">
-                    <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </div>
-                )}
-                {isPending && (
-                  <div className="w-6 h-6 rounded-full border-2 border-slate-200 shrink-0" />
-                )}
-                <span className={`text-sm ${isDone ? 'text-green-700 font-medium' : isActive ? 'text-blue-700 font-semibold' : isError ? 'text-red-700 font-medium' : 'text-slate-400'}`}>
-                  {step.label}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        {error && (
-          <div className="mx-6 mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {phase === 'done' && (
-          <div className="mx-6 mb-4 space-y-3">
-            {summary && (
-              <div className="px-4 py-3 bg-green-50 border border-green-200 rounded-xl text-sm">
-                <p className="font-semibold text-green-800 mb-1">✅ Follow-up Entry Stored</p>
-                <p className="text-green-700 text-xs whitespace-pre-line">{summary}</p>
-              </div>
-            )}
-            {fieldsUpdated && fieldsUpdated.length > 0 && (
-              <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-sm">
-                <p className="font-semibold text-blue-800 mb-1">📊 Lead Updated</p>
-                <p className="text-blue-700 text-xs">Updated fields: {fieldsUpdated.join(', ')}</p>
-              </div>
-            )}
-            {requirementChanges && requirementChanges.length > 0 && (
-              <div className="px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm">
-                <p className="font-semibold text-amber-800 mb-1">Requirement Changed</p>
-                <div className="text-amber-700 text-xs space-y-0.5">
-                  {requirementChanges.map((c, i) => (
-                    <p key={i}>
-                      {c.old_product && <span>{c.old_product} → {c.new_product}</span>}
-                      {c.old_size && <span>{c.old_size} → {c.new_size}</span>}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            )}
-            {aiExtracted && Object.keys(aiExtracted).length > 0 && (
-              <div className="px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl text-sm">
-                <p className="font-semibold text-indigo-800 mb-1">AI Extracted Info</p>
-                <div className="text-indigo-700 text-xs space-y-0.5">
-                  {Object.entries(aiExtracted).map(([k, v]) => (
-                    <p key={k}><span className="font-medium">{k}:</span> {String(v)}</p>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="flex items-center justify-end px-6 py-4 border-t border-slate-200 bg-slate-50">
-          <button
-            onClick={onClose}
-            disabled={phase !== 'done' && phase !== 'error'}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {phase === 'done' ? 'Done' : phase === 'error' ? 'Close' : 'Processing...'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Follow-up History Panel in Lead Detail Modal ─────────────────────────────
 
@@ -294,34 +173,41 @@ function FollowUpHistory({ entries }) {
           <div key={i} className="relative pl-6 pb-3 border-l-2 border-blue-200 last:border-transparent">
             <div className="absolute -left-[5px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-white" />
             <div className="bg-slate-50 rounded-lg px-4 py-3 border border-slate-100">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2 mb-2">
                 <span className="text-xs font-semibold text-slate-700">
+                  {entry.source === 'AI Call' || entry.source === 'ai_call_agent' ? '🤖 AI Call – Follow Up' : entry.source || 'Follow Up'}
+                </span>
+                <span className="text-xs text-slate-500 ml-auto flex items-center gap-1">
+                  <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
                   {formatDate(entry.date)}
                 </span>
-                {entry.source && (
-                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${entry.source === 'AI Call' || entry.source === 'ai_call_agent'
-                    ? 'bg-purple-100 text-purple-700'
-                    : 'bg-slate-100 text-slate-600'
-                    }`}>
-                    {entry.source === 'ai_call_agent' ? '🤖 AI Call' : entry.source === 'AI Call' ? '🤖 AI Call' : entry.source}
-                  </span>
-                )}
-                {entry.stage && (
-                  <span className="text-xs px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700 font-medium">
-                    {entry.stage}
-                  </span>
-                )}
               </div>
-              <p className="text-sm text-slate-700 whitespace-pre-line">{entry.remark || '—'}</p>
+
+              <div className="text-xs font-medium text-slate-500 mb-1 tracking-wide uppercase">Summary</div>
+              <p className="text-sm text-slate-800 whitespace-pre-line mb-3 leading-relaxed">{entry.remark || '—'}</p>
+
               {entry.transcript && (
-                <details className="mt-2">
-                  <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800 font-medium">
-                    View Transcript
+                <details className="mt-2 mb-2 group">
+                  <summary className="text-xs text-blue-600 cursor-pointer hover:text-blue-800 font-medium list-none flex items-center gap-1 select-none">
+                    Transcript <span className="text-[10px] group-open:hidden">▼</span><span className="text-[10px] hidden group-open:inline">▲</span>
+                    <span className="text-slate-400 font-normal ml-1"> (Expand to view)</span>
                   </summary>
                   <pre className="mt-2 text-xs text-slate-600 bg-white border border-slate-200 rounded-lg p-3 max-h-[150px] overflow-y-auto whitespace-pre-wrap">
                     {entry.transcript}
                   </pre>
                 </details>
+              )}
+
+              {entry.recording_url && (
+                <div className="mt-3 flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-slate-200 w-fit">
+                  <span className="text-xs font-medium text-slate-700 flex items-center gap-1">
+                    <svg className="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Audio
+                  </span>
+                  <audio src={entry.recording_url} controls className="h-8 min-w-[200px] outline-none" />
+                </div>
               )}
             </div>
           </div>
@@ -378,109 +264,32 @@ function RequirementChangeHistory({ changes }) {
 
 // ── AI Call Transcripts ──────────────────────────────────────────────────────
 
-function AICallTranscripts({ logs }) {
-  if (!logs || logs.length === 0) return null;
-
-  const sorted = [...logs].sort((a, b) => new Date(b.date || b.created_at) - new Date(a.date || a.created_at));
-
-  return (
-    <div className="mt-6">
-      <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide mb-3 flex items-center gap-2">
-        <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-        </svg>
-        AI Call Transcripts
-      </h3>
-      <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
-        {sorted.map((log, i) => (
-          <div key={i} className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-indigo-700">
-                {formatDate(log.date || log.created_at)}
-              </span>
-              {log.recording_url && (
-                <a
-                  href={log.recording_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium hover:bg-indigo-200 transition-colors flex items-center gap-1"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Recording
-                </a>
-              )}
-            </div>
-            {/* Summary */}
-            {log.summary && (
-              <div className="mb-2 px-3 py-2 bg-white border border-indigo-100 rounded-lg">
-                <p className="text-xs font-medium text-indigo-800 mb-0.5">Summary</p>
-                <p className="text-xs text-slate-700 whitespace-pre-line">{log.summary}</p>
-              </div>
-            )}
-            {/* Legacy: extracted_data pills */}
-            {!log.summary && log.extracted_data && Object.keys(log.extracted_data).length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {Object.entries(log.extracted_data).filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => (
-                  <span key={k} className="text-xs px-2 py-0.5 rounded bg-white border border-indigo-100 text-indigo-700">
-                    <span className="font-medium">{k}:</span> {String(v)}
-                  </span>
-                ))}
-              </div>
-            )}
-            {/* Legacy: fields_updated */}
-            {log.fields_updated && log.fields_updated.length > 0 && (
-              <div className="mb-2">
-                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 font-medium">
-                  Updated: {log.fields_updated.join(', ')}
-                </span>
-              </div>
-            )}
-            {/* Transcript */}
-            {log.transcript && (
-              <details>
-                <summary className="text-xs text-indigo-600 cursor-pointer hover:text-indigo-800 font-medium">
-                  View Full Transcript
-                </summary>
-                <pre className="mt-2 text-xs text-slate-600 bg-white border border-slate-200 rounded-lg p-3 max-h-[150px] overflow-y-auto whitespace-pre-wrap">
-                  {log.transcript}
-                </pre>
-              </details>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+// AI Call Transcripts has been merged with FollowUpHistory
 
 function LeadDetailModal({ lead, onClose, onCall }) {
   if (!lead) return null;
 
   const skipKeys = new Set(['__v', 'follow_up_control', 'ai_call_logs', 'requirement_change_history', 'ai_calls', 'followup_history', 'last_transcript']);
-  const entries = Object.entries(lead).filter(([k]) => !skipKeys.has(k));
+  const entries = Object.entries(lead).filter(([k]) => !skipKeys.has(k) && !!lead[k]);
 
-  // Read from new fields first, fall back to legacy fields
-  const followUpEntries = lead.followup_history || lead.follow_up_control?.entries || [];
+  const sortedCalls = [...(lead.ai_calls || lead.ai_call_logs || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const manualFollowUps = (lead.followup_history || []);
   const requirementChanges = lead.requirement_change_history || [];
-  const aiCallLogs = lead.ai_calls || lead.ai_call_logs || [];
+
+  const lastCallFormatted = sortedCalls.length > 0 ? formatDate(sortedCalls[0].date) : 'No recent calls';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 sm:p-6" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">
-              {lead['Client_Company_Name'] || 'Lead Details'}
+            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              Lead Profile
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {lead['Enquiry Code'] || 'No enquiry code'}
-            </p>
           </div>
           <button
             onClick={onClose}
@@ -493,40 +302,146 @@ function LeadDetailModal({ lead, onClose, onCall }) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-            {entries.map(([key, val]) => (
-              <div key={key} className="py-2 border-b border-slate-100">
-                <dt className="text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  {FIELD_LABELS[key] || key.replace(/_/g, ' ')}
-                </dt>
-                <dd className="mt-0.5 text-sm text-slate-800 break-words">
-                  {key === 'Client_Number' && val ? (
-                    <a href={`tel:${val}`} className="text-blue-600 hover:underline">{formatFieldValue(key, val)}</a>
-                  ) : (
-                    formatFieldValue(key, val)
-                  )}
-                </dd>
-              </div>
-            ))}
-          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Left side: Basic info */}
+            <div>
+              <div className="mb-6 p-5 bg-slate-50 border border-slate-200 rounded-xl relative shadow-sm">
+                <span className="absolute top-5 right-5 text-xs font-semibold px-2 py-1 bg-emerald-100 text-emerald-800 rounded">{lead['Status'] || 'Unknown'}</span>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">📞</span> <span className="text-lg font-bold text-slate-900">{lead['Client_Number'] || 'N/A'}</span>
+                </div>
+                <h3 className="text-base font-medium text-slate-800">{lead['Client_Company_Name'] || 'Lead Details'}</h3>
+                <div className="text-xs text-slate-500 mt-2 font-mono bg-slate-200 px-2 py-0.5 rounded inline-block">{lead['Enquiry Code'] || 'No enquiry code'}</div>
 
-          <RequirementChangeHistory changes={requirementChanges} />
-          <FollowUpHistory entries={followUpEntries} />
-          <AICallTranscripts logs={aiCallLogs} />
+                <div className="mt-4 pt-4 border-t border-slate-200 flex flex-col gap-1">
+                  <div className="text-sm">
+                    <span className="text-slate-500 font-medium tracking-wide">Lead Type:</span> <span className="text-slate-900 font-semibold ml-1">{lead['Lead_Type'] || 'Follow Up'}</span>
+                  </div>
+                  <div className="text-sm">
+                    <span className="text-slate-500 font-medium tracking-wide">Last Call:</span> <span className="text-slate-900 font-semibold ml-1">{lastCallFormatted}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 mb-6">
+                {entries.map(([key, val]) => (
+                  <div key={key} className="py-2 border-b border-slate-100">
+                    <dt className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      {FIELD_LABELS[key] || key.replace(/_/g, ' ')}
+                    </dt>
+                    <dd className="text-sm font-medium text-slate-800 break-words">
+                      {key === 'Client_Number' && val ? (
+                        <a href={`tel:${val}`} className="text-blue-600 hover:underline">{formatFieldValue(key, val)}</a>
+                      ) : (
+                        formatFieldValue(key, val)
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </div>
+
+              <RequirementChangeHistory changes={requirementChanges} />
+              <FollowUpHistory entries={manualFollowUps} />
+            </div>
+
+            {/* Right side: Call History */}
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide mb-4 flex items-center justify-between border-b border-slate-200 pb-3">
+                <span className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                  </svg>
+                  Recent Calls
+                </span>
+                <span className="bg-blue-100 text-blue-800 text-xs py-0.5 px-2 rounded-full">{sortedCalls.length}</span>
+              </h3>
+
+              <div className="space-y-4 pr-1 max-h-[60vh] overflow-y-auto">
+                {sortedCalls.map((c, i) => {
+                  const statusLower = String(c.call_status).toLowerCase();
+                  const statusColor = statusLower.includes('completed') ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                    statusLower.includes('no answer') || statusLower.includes('no-answer') ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                      statusLower.includes('failed') ? 'bg-red-100 text-red-800 border-red-200' :
+                        'bg-slate-100 text-slate-800 border-slate-200';
+
+                  return (
+                    <div key={i} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow transition-shadow relative overflow-hidden">
+                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 opacity-80"></div>
+                      <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-3">
+                        <div className="flex flex-col gap-1">
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider border w-max ${statusColor}`}>
+                            {c.call_status || 'Unknown'}
+                          </span>
+                          <span className="text-xs text-slate-500 font-medium">{formatDate(c.date)}</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[13px] font-semibold text-slate-700 bg-slate-100 px-2 py-1 rounded inline-block">{c.duration || 0}s</div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 mt-3">
+                        {c.recording_url && (
+                          <details className="group">
+                            <summary className="text-xs text-blue-600 font-semibold cursor-pointer flex items-center gap-1.5 select-none bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 transition-colors">
+                              🎧 Audio Recording <span className="text-[10px] group-open:-rotate-180 transition-transform ml-auto text-blue-400">▼</span>
+                            </summary>
+                            <div className="mt-2 px-2">
+                              <audio src={c.recording_url} controls className="h-10 w-full outline-none" />
+                            </div>
+                          </details>
+                        )}
+                        {c.transcript && (
+                          <details className="group">
+                            <summary className="text-xs text-sky-600 font-semibold cursor-pointer flex items-center gap-1.5 select-none bg-sky-50 px-3 py-2 rounded-lg hover:bg-sky-100 transition-colors">
+                              📝 Transcript <span className="text-[10px] group-open:-rotate-180 transition-transform ml-auto text-sky-400">▼</span>
+                            </summary>
+                            <div className="mt-2 px-2">
+                              <div className="text-[13px] text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-4 max-h-[250px] overflow-y-auto whitespace-pre-wrap font-serif leading-relaxed">
+                                {c.transcript}
+                              </div>
+                            </div>
+                          </details>
+                        )}
+                        {c.summary && (
+                          <details className="group">
+                            <summary className="text-xs text-purple-600 font-semibold cursor-pointer flex items-center gap-1.5 select-none bg-purple-50 px-3 py-2 rounded-lg hover:bg-purple-100 transition-colors">
+                              📊 Call Analytics <span className="text-[10px] group-open:-rotate-180 transition-transform ml-auto text-purple-400">▼</span>
+                            </summary>
+                            <div className="mt-2 px-2">
+                              <div className="text-[13px] text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-4 whitespace-pre-line leading-relaxed">
+                                {c.summary}
+                              </div>
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+                {sortedCalls.length === 0 && (
+                  <div className="text-sm text-slate-500 italic bg-slate-50 p-6 rounded-xl border border-dashed border-slate-300 text-center">
+                    No AI calls recorded yet.
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-white shrink-0">
           {lead['Client_Number'] && onCall && (
             <button
               onClick={() => { onCall(lead); onClose(); }}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              className="px-5 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm hover:shadow-md rounded-xl transition-all flex items-center gap-2"
             >
-              AI Call
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              AI Call Now
             </button>
           )}
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+            className="px-5 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
           >
             Close
           </button>
@@ -550,34 +465,29 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
   const [viewLead, setViewLead] = useState(null);
   const [callingId, setCallingId] = useState(null);
   const [callResult, setCallResult] = useState(null);
-  const [callState, setCallState] = useState(null); // Call progress modal state
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [activeCalls, setActiveCalls] = useState(new Set());
+  const [callResults, setCallResults] = useState({});
   const perPage = 10;
 
-  const pollTimerRef = useRef(null);
+  const selectedAgentRef = useRef(selectedAgent);
+  const searchRef = useRef(search);
+  const viewLeadRef = useRef(viewLead);
 
-  /**
-   * Full AI calling flow (hybrid polling):
-   * 1. Initiate call with CRM variables
-   * 2. Poll BOTH: lead document (for webhook) AND Bolna execution API (for call status)
-   * 3. Whichever detects completion first wins
-   * 4. Process transcript, show results, refresh UI
-   */
+  useEffect(() => {
+    selectedAgentRef.current = selectedAgent;
+    searchRef.current = search;
+    viewLeadRef.current = viewLead;
+  }, [selectedAgent, search, viewLead]);
+
   const handleCall = async (lead) => {
     const phone = lead['Client_Number'];
     if (!phone) return;
 
-    const leadName = `${lead['Client_Person_Name'] || ''} – ${lead['Client_Company_Name'] || ''}`.trim();
-    const enquiryCode = lead['Enquiry Code'] || '';
-
-    // Snapshot: remember how many ai_calls the lead had before this call
-    const prevAiCallCount = (lead.ai_calls || lead.ai_call_logs || []).length;
-
-    setCallingId(lead._id);
-    setCallResult(null);
-    setCallState({ phase: 'initiate', leadName });
+    setActiveCalls(prev => new Set(prev).add(lead._id));
+    setCallResults(prev => ({ ...prev, [lead._id]: null }));
 
     try {
-      // ── Step 1: Initiate the call via backend ──
       const res = await fetch(`${API_BASE}/call`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -586,7 +496,7 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
           agent_id: agentId,
           section_name: sectionName || title,
           lead_data: {
-            enquiry_code: enquiryCode,
+            enquiry_code: lead['Enquiry Code'] || '',
             company_name: lead['Client_Company_Name'] || '',
             contact_name: lead['Client_Person_Name'] || '',
             phone_number: String(phone),
@@ -605,134 +515,84 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
       const data = await res.json();
 
       if (!data.success) {
-        setCallState({ phase: 'error', leadName, error: data.error || 'Call failed.' });
-        setCallResult({ id: lead._id, ok: false, msg: data.error || 'Call failed.' });
-        setCallingId(null);
-        return;
-      }
-
-      const executionId = data.execution_id || null;
-      const typeLabel = (data.call_type || '').toUpperCase();
-      setCallResult({ id: lead._id, ok: true, msg: `${typeLabel} call initiated!` });
-      setCallState({ phase: 'calling', leadName });
-
-      // ── Step 2: Hybrid poll — check both lead (for webhook) AND Bolna (for call status) ──
-      const pollResult = await hybridPoll(enquiryCode, prevAiCallCount, executionId);
-
-      if (pollResult.source === 'webhook') {
-        // Webhook delivered the transcript — lead already updated
-        setCallState({ phase: 'processing', leadName });
-        await new Promise(r => setTimeout(r, 400));
-
-        const latestAiCall = (pollResult.lead.ai_calls || []).slice(-1)[0] || {};
-        const latestFollowup = (pollResult.lead.followup_history || []).slice(-1)[0] || {};
-
-        setCallState({
-          phase: 'done',
-          leadName,
-          summary: latestAiCall.summary || latestFollowup.remark || 'Transcript processed.',
-          aiExtracted: {},
-          fieldsUpdated: [],
-          requirementChanges: pollResult.lead.requirement_change_history?.slice(-1) || [],
-        });
-
-        fetchLeads(selectedAgent, search);
-
-      } else if (pollResult.source === 'bolna_completed') {
-        // Bolna says call completed — fetch transcript via /api/call/complete
-        setCallState({ phase: 'processing', leadName });
-        await completeCallFlow(enquiryCode, executionId, leadName);
-
+        setCallResults(prev => ({ ...prev, [lead._id]: { ok: false, msg: data.error || 'Call failed' } }));
+        setActiveCalls(prev => { const n = new Set(prev); n.delete(lead._id); return n; });
+        setTimeout(() => setCallResults(prev => ({ ...prev, [lead._id]: null })), 5000);
       } else {
-        // Timeout — try the complete call as last resort
-        setCallState({ phase: 'processing', leadName });
-        await completeCallFlow(enquiryCode, executionId, leadName);
-      }
+        const typeLabel = (data.call_type || '').toUpperCase();
+        setCallResults(prev => ({ ...prev, [lead._id]: { ok: true, msg: `${typeLabel} call started` } }));
+        // Deselect if it was selected so they don't call again accidentally
+        setSelectedIds(prev => { const n = new Set(prev); n.delete(lead._id); return n; });
 
+        if (data.execution_id) {
+          pollExecution(lead['Enquiry Code'], data.execution_id, lead._id);
+        } else {
+          setActiveCalls(prev => { const n = new Set(prev); n.delete(lead._id); return n; });
+          setTimeout(() => setCallResults(prev => ({ ...prev, [lead._id]: null })), 5000);
+        }
+      }
     } catch (err) {
-      setCallState({ phase: 'error', leadName, error: 'Could not reach the server.' });
-      setCallResult({ id: lead._id, ok: false, msg: 'Could not reach the server.' });
-    } finally {
-      setCallingId(null);
+      setCallResults(prev => ({ ...prev, [lead._id]: { ok: false, msg: 'Network Error' } }));
+      setActiveCalls(prev => { const n = new Set(prev); n.delete(lead._id); return n; });
+      setTimeout(() => setCallResults(prev => ({ ...prev, [lead._id]: null })), 5000);
     }
   };
 
-  /**
-   * Hybrid poll — checks two things on each tick:
-   * 1. Lead document: did ai_calls array grow? (webhook fired)
-   * 2. Bolna execution API: did call status become completed?
-   * Returns { source: 'webhook'|'bolna_completed'|'timeout', lead? }
-   */
-  const hybridPoll = async (enquiryCode, prevCount, executionId) => {
-    const MAX_POLLS = 60;        // Max 5 minutes
-    const POLL_INTERVAL = 5000;  // Every 5 seconds
-
+  const pollExecution = async (enquiryCode, executionId, leadId) => {
+    const MAX_POLLS = 60; // Max 5 mins
+    const POLL_INTERVAL = 5000;
     for (let i = 0; i < MAX_POLLS; i++) {
-      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
-
-      // Check 1: Did the webhook update the lead?
+      await new Promise(r => setTimeout(r, POLL_INTERVAL));
       try {
-        const leadRes = await fetch(`${API_BASE}/leads/${encodeURIComponent(enquiryCode)}`);
-        const leadResult = await leadRes.json();
-        if (leadResult.success && leadResult.data) {
-          const currentCount = (leadResult.data.ai_calls || leadResult.data.ai_call_logs || []).length;
-          if (currentCount > prevCount) {
-            return { source: 'webhook', lead: leadResult.data };
+        const res = await fetch(`${API_BASE}/execution/${executionId}`);
+        const result = await res.json();
+        if (result.success && result.data) {
+          const s = (result.data.status || '').toLowerCase();
+          if (['completed', 'ended', 'finished', 'done', 'failed', 'error'].includes(s)) {
+            setCallResults(prev => ({ ...prev, [leadId]: { ok: true, msg: 'Processing call...' } }));
+            await completeCallFlow(enquiryCode, executionId, leadId);
+            return;
           }
         }
-      } catch { /* ignore */ }
-
-      // Check 2: Is the Bolna call completed?
-      if (executionId) {
-        try {
-          const execRes = await fetch(`${API_BASE}/execution/${executionId}`);
-          const execResult = await execRes.json();
-          if (execResult.success && execResult.data) {
-            const execStatus = (execResult.data.status || '').toLowerCase();
-            if (['completed', 'ended', 'finished', 'done'].includes(execStatus)) {
-              return { source: 'bolna_completed' };
-            }
-            if (['failed', 'error'].includes(execStatus)) {
-              return { source: 'bolna_completed' }; // Still try to get transcript
-            }
-          }
-        } catch { /* ignore */ }
-      }
+      } catch (err) { }
     }
-
-    return { source: 'timeout' };
+    setActiveCalls(prev => { const n = new Set(prev); n.delete(leadId); return n; });
+    setCallResults(prev => ({ ...prev, [leadId]: { ok: false, msg: 'Time limit exceeded' } }));
+    setTimeout(() => setCallResults(prev => ({ ...prev, [leadId]: null })), 5000);
   };
 
-  /**
-   * Call /api/call/complete to retrieve transcript from Bolna API,
-   * process it, and update the lead.
-   */
-  const completeCallFlow = async (enquiryCode, executionId, leadName) => {
+  const completeCallFlow = async (enquiryCode, executionId, leadId) => {
     try {
       const res = await fetch(`${API_BASE}/call/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enquiry_code: enquiryCode, execution_id: executionId || null }),
+        body: JSON.stringify({ enquiry_code: enquiryCode, execution_id: executionId }),
       });
-
       const result = await res.json();
-
       if (result.success) {
-        setCallState({
-          phase: 'done',
-          leadName,
-          summary: result.summary || 'Call processed.',
-          aiExtracted: result.ai_extracted || {},
-          fieldsUpdated: result.fields_updated || [],
-          requirementChanges: result.requirement_changes || [],
-        });
-
-        fetchLeads(selectedAgent, search);
+        setCallResults(prev => ({ ...prev, [leadId]: { ok: true, msg: 'Stored! Refreshing...' } }));
+        fetchLeads(selectedAgentRef.current, searchRef.current);
+        if (viewLeadRef.current && String(viewLeadRef.current._id) === String(leadId)) {
+          fetch(`${API_BASE}/leads/${encodeURIComponent(enquiryCode)}`)
+            .then(r => r.json())
+            .then(d => { if (d.success) setViewLead(d.data) });
+        }
       } else {
-        setCallState({ phase: 'error', leadName, error: result.error || 'Failed to complete call flow.' });
+        setCallResults(prev => ({ ...prev, [leadId]: { ok: false, msg: 'Failed to process' } }));
       }
     } catch (err) {
-      setCallState({ phase: 'error', leadName, error: 'Failed to complete call processing.' });
+      setCallResults(prev => ({ ...prev, [leadId]: { ok: false, msg: 'Processing Error' } }));
+    } finally {
+      setActiveCalls(prev => { const n = new Set(prev); n.delete(leadId); return n; });
+      setTimeout(() => setCallResults(prev => ({ ...prev, [leadId]: null })), 5000);
+    }
+  };
+
+  const handleBulkCall = async () => {
+    if (selectedIds.size === 0) return;
+    const leadsToCall = leads.filter(l => selectedIds.has(l._id));
+    for (const lead of leadsToCall) {
+      handleCall(lead); // Fire non-blocking
     }
   };
 
@@ -759,6 +619,12 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
 
       if (data.success) {
         setLeads(data.data);
+        setSelectedIds(prev => {
+          const validLeads = new Set(data.data.map(l => l._id));
+          const newSet = new Set();
+          for (let id of prev) { if (validLeads.has(id)) newSet.add(id); }
+          return newSet;
+        });
       } else {
         setError(data.error || 'Failed to load leads.');
         setLeads([]);
@@ -779,18 +645,29 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
     fetchLeads('All Agents', '');
   }, [fetchLeads]);
 
+  // Socket.io for Real-time Refresh
+  useEffect(() => {
+    const socket = io();
+    socket.on('call_completed', (data) => {
+      // Re-fetch standard leads list quietly
+      fetchLeads(selectedAgentRef.current, searchRef.current);
+      // Re-fetch detailed view if current lead was updated
+      if (data && data.enquiry_code && viewLeadRef.current && viewLeadRef.current['Enquiry Code'] === data.enquiry_code) {
+        fetch(`${API_BASE}/leads/${encodeURIComponent(data.enquiry_code)}`)
+          .then(r => r.json())
+          .then(d => { if (d.success) setViewLead(d.data); });
+      }
+    });
+
+    return () => socket.disconnect();
+  }, [fetchLeads]);
+
   const handleSearch = (val) => {
     setSearch(val);
     clearTimeout(searchTimer.current);
     searchTimer.current = setTimeout(() => fetchLeads(selectedAgent, val), 400);
   };
 
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-    };
-  }, []);
 
   const cols = COLUMNS[status.toLowerCase()] || COLUMNS.potential;
   const totalPages = Math.max(1, Math.ceil(leads.length / perPage));
@@ -842,6 +719,15 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
           <span className="text-xs text-slate-400 ml-auto shrink-0">
             {leads.length} lead{leads.length !== 1 ? 's' : ''}
           </span>
+        )}
+
+        {!loading && leads.length > 0 && selectedIds.size > 0 && (
+          <button
+            onClick={handleBulkCall}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shrink-0 shadow-sm"
+          >
+            Bulk Call ({selectedIds.size})
+          </button>
         )}
       </div>
 
@@ -933,52 +819,96 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr className="text-slate-500 uppercase tracking-wider text-xs font-semibold">
+                  <th className="px-5 py-4 w-12 text-center">
+                    <input
+                      type="checkbox"
+                      className="rounded text-blue-600 cursor-pointer w-4 h-4 outline-none"
+                      checked={paginated.length > 0 && paginated.every(l => selectedIds.has(l._id))}
+                      onChange={(e) => {
+                        const isChecked = e.target.checked;
+                        setSelectedIds(prev => {
+                          const newSet = new Set(prev);
+                          paginated.forEach(l => isChecked ? newSet.add(l._id) : newSet.delete(l._id));
+                          return newSet;
+                        });
+                      }}
+                    />
+                  </th>
                   {cols.map((col) => (
                     <th key={col.key} className="px-5 py-4 whitespace-nowrap">{col.label}</th>
                   ))}
-                  <th className="px-5 py-4 text-right">Actions</th>
+                  <th className="px-5 py-4 text-right min-w-[120px]">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {paginated.map((lead, i) => (
-                  <tr key={String(lead._id ?? i)} className="hover:bg-slate-50/60 transition-colors">
-                    {cols.map((col) => (
-                      <td key={col.key} className="px-5 py-4 text-slate-700">
-                        <CellValue col={col} value={lead[col.key]} />
-                      </td>
-                    ))}
-                    <td className="px-5 py-4 text-right">
-                      <div className="flex justify-end items-center gap-1">
-                        <button
-                          onClick={() => handleCall(lead)}
-                          disabled={callingId === String(lead._id)}
-                          className="px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-100 disabled:opacity-50"
-                        >
-                          {callingId === String(lead._id) ? 'Calling...' : 'Call'}
-                        </button>
-                        <button
-                          onClick={async () => {
-                            try {
-                              const r = await fetch(`${API_BASE}/leads/${encodeURIComponent(lead['Enquiry Code'])}`);
-                              const d = await r.json();
-                              setViewLead(d.success ? d.data : lead);
-                            } catch {
-                              setViewLead(lead);
-                            }
+                {paginated.map((lead, i) => {
+                  const isActive = activeCalls.has(lead._id);
+                  const result = callResults[lead._id];
+
+                  return (
+                    <tr key={String(lead._id ?? i)} className={`transition-colors ${selectedIds.has(lead._id) ? 'bg-blue-50/40' : 'hover:bg-slate-50/60'}`}>
+                      <td className="px-5 py-4 text-center">
+                        <input
+                          type="checkbox"
+                          className="rounded text-blue-600 cursor-pointer w-4 h-4 outline-none"
+                          checked={selectedIds.has(lead._id)}
+                          onChange={(e) => {
+                            const isChecked = e.target.checked;
+                            setSelectedIds(prev => {
+                              const newSet = new Set(prev);
+                              isChecked ? newSet.add(lead._id) : newSet.delete(lead._id);
+                              return newSet;
+                            });
                           }}
-                          className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                        >
-                          View
-                        </button>
-                        {callResult && String(callResult.id) === String(lead._id) && (
-                          <span className={`text-xs ml-1 ${callResult.ok ? 'text-green-600' : 'text-red-600'}`}>
-                            {callResult.msg}
+                        />
+                      </td>
+                      {cols.map((col) => (
+                        <td key={col.key} className="px-5 py-4 text-slate-700">
+                          <CellValue col={col} value={lead[col.key]} />
+                        </td>
+                      ))}
+                      <td className="px-5 py-4 text-right whitespace-nowrap">
+                        {isActive ? (
+                          <span className="text-xs font-medium text-blue-500 flex items-center gap-1 justify-end animate-pulse">
+                            <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                            </svg>
+                            Calling...
                           </span>
+                        ) : (
+                          <div className="flex justify-end items-center gap-2">
+                            <button
+                              onClick={() => handleCall(lead)}
+                              className="px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-100"
+                            >
+                              Call
+                            </button>
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const r = await fetch(`${API_BASE}/leads/${encodeURIComponent(lead['Enquiry Code'])}`);
+                                  const d = await r.json();
+                                  setViewLead(d.success ? d.data : lead);
+                                } catch {
+                                  setViewLead(lead);
+                                }
+                              }}
+                              className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                            >
+                              View
+                            </button>
+                          </div>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                        {result && !isActive && (
+                          <div className={`text-[10px] mt-1 pr-1 font-medium ${result.ok ? 'text-green-600' : 'text-red-500'}`}>
+                            {result.msg}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -1011,12 +941,6 @@ export default function LeadSection({ status, sectionName, agentId, title, descr
 
       {/* Lead Detail Modal */}
       {viewLead && <LeadDetailModal lead={viewLead} onClose={() => setViewLead(null)} onCall={agentId ? handleCall : null} />}
-
-      {/* Call Progress Modal */}
-      <CallProgressModal
-        callState={callState}
-        onClose={() => setCallState(null)}
-      />
     </div>
   );
 }
