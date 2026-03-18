@@ -198,6 +198,18 @@ function resolveAgentId(callType, clientAgentId) {
 
 function buildLeadContext(lead) {
     return {
+        // Required for prompt variables {Client_Person_Name}, etc.
+        Client_Person_Name: lead.Client_Person_Name || '',
+        Client_Company_Name: lead.Client_Company_Name || '',
+        Lead_Owner: lead.Lead_Owner || '',
+        Product: lead.Product || '',
+        Location: lead.Location || '',
+        Industry: lead.Industry || '',
+        Quantity: lead.Quantity ?? '',
+        Lead_Type: lead.Lead_Type || '',
+        Remarks: lead.Remarks || '',
+
+        // Compatibility aliases for older prompt versions or scripts
         company_name: lead.Client_Company_Name || '',
         contact_name: lead.Client_Person_Name || '',
         phone_number: lead.Client_Number || '',
@@ -252,10 +264,66 @@ function normalizePhone(raw) {
     return phone;
 }
 
+/**
+ * Strict mapping rule for incoming application JSON fields.
+ * Maps field names from API payload to internal variable names used in prompts.
+ */
+function mapLeadData(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+
+    // Create a normalized version of the payload for easier lookup
+    const normal = {};
+    for (const [key, value] of Object.entries(payload)) {
+        const normalizedKey = key.toLowerCase().replace(/[\s_-]/g, '');
+        normal[normalizedKey] = value;
+    }
+
+    const get = (keys, defaultValue = "") => {
+        for (const k of keys) {
+            const normK = k.toLowerCase().replace(/[\s_-]/g, '');
+            if (normal[normK] !== undefined) return normal[normK];
+        }
+        return defaultValue;
+    };
+
+    const mapped = {
+        Client_Person_Name: get(['Contact Person', 'Client_Person_Name', 'contact_name', 'name']),
+        Client_Company_Name: get(['Company Name', 'Client_Company_Name', 'company_name', 'company']),
+        Lead_Owner: get(['Lead Owner', 'Lead_Owner', 'owner']),
+        Product: get(['Product']),
+        Location: get(['Location']),
+        Industry: get(['Industry']),
+        Quantity: get(['Quantity']),
+        Lead_Type: get(['Lead Type', 'Lead_Type', 'type']),
+        Remarks: get(['Remarks', 'Remark', 'note', 'notes'])
+    };
+
+    // Add internal field aliases for compatibility with other helper functions
+    mapped.contact_name = mapped.Client_Person_Name;
+    mapped.company_name = mapped.Client_Company_Name;
+    mapped.lead_owner = mapped.Lead_Owner;
+    mapped.remarks = mapped.Remarks;
+    mapped.quantity = mapped.Quantity;
+    mapped.location = mapped.Location;
+    mapped.product = mapped.Product;
+    mapped.lead_type = mapped.Lead_Type;
+    mapped.industry = mapped.Industry;
+
+    return mapped;
+}
+
 // ── Call endpoints ────────────────────────────────────────────────────────────
 
 app.post('/api/call', async (req, res) => {
     let { recipient_phone_number, lead_data, section_name } = req.body;
+
+    // STEP 0: Perform strict mapping of application fields to prompt variables
+    const mappedData = mapLeadData(lead_data);
+
+    // If phone number is missing in body, check lead_data fields
+    if (!recipient_phone_number && lead_data) {
+        recipient_phone_number = lead_data['Phone Number'] || lead_data['Client_Number'] || lead_data['Contact Number'] || (mappedData ? mappedData.phone : null);
+    }
 
     if (!recipient_phone_number) {
         return res.status(400).json({ success: false, error: 'Recipient phone number is required.' });
@@ -267,46 +335,57 @@ app.post('/api/call', async (req, res) => {
         const database = await connectDB();
         const collection = database.collection('leads_master');
 
-        // Step 1: Fetch the real lead from MongoDB for accurate status + fields
-        const enquiryCode = lead_data?.enquiry_code || null;
+        // Step 1: Resolve metadata (Enquiry Code and Status)
+        // We use provided data fields as priority to avoid unnecessary DB READS for initiation
+        const enquiryCode = lead_data?.['Enquiry Code'] || lead_data?.enquiry_code || '';
+        const leadStatus = lead_data?.Status || lead_data?.status || '';
+
         let dbLead = null;
         if (enquiryCode) {
-            dbLead = await collection.findOne({ 'Enquiry Code': enquiryCode });
+            dbLead = await collection.findOne({ 'Enquiry Code': enquiryCode }).catch(() => null);
         }
 
-        // Step 2: Determine call type & agent from the DB lead's actual Status
-        const leadStatus = dbLead?.Status || lead_data?.status || '';
-        const callType = resolveCallType(leadStatus);
-        const agent_id = getAgentIdByStatus(leadStatus);
+        // Resolve final values for call routing
+        const finalStatus = leadStatus || dbLead?.Status || '';
+        const callType = resolveCallType(finalStatus);
+        const agent_id = getAgentIdByStatus(finalStatus);
 
         if (!agent_id) {
             return res.status(400).json({ success: false, error: 'No agent ID resolved for this call type.' });
         }
 
-        // Step 3: Build enriched context from DB lead (falls back to client data)
-        const leadContext = dbLead ? buildLeadContext(dbLead) : (lead_data || {});
-
-        // Step 4: Build Bolna payload with CRM variables injected via user_data
-        // These variables are referenced in the agent prompt as {name}, {company_name}, etc.
-        // IMPORTANT: remarks are transformed into a call_context so the agent doesn't read them verbatim
+        // Step 2: Build Context & Natural briefing
+        // Fallback to DB lead if mappedData is incomplete
+        const leadContext = dbLead ? buildLeadContext(dbLead) : (mappedData || {});
         const callContext = buildCallContext(leadContext);
 
+        // Step 3: Build Bolna payload with variables EXACTLY as referenced in the agent prompt
+        // Force all values to strings to ensure Bolna substitution works correctly
         const bolnaPayload = {
             agent_id,
             recipient_phone_number,
-            phone_number: recipient_phone_number, // Added for newer .ai API support
+            phone_number: recipient_phone_number,
             user_data: {
-                // Primary CRM variables the agent prompt references
-                name: leadContext.contact_name || '',
-                company_name: leadContext.company_name || '',
-                product: leadContext.product || '',
-                location: leadContext.location || '',
-                quantity: leadContext.quantity || '',
-                // Natural context briefing (NOT raw remarks)
-                call_context: callContext,
-                // Additional context
-                call_type: callType,
-                enquiry_code: leadContext.enquiry_code || '',
+                // VARIABLES REQUESTED BY USER (Mandatory mapping)
+                Client_Person_Name: String(mappedData?.Client_Person_Name || leadContext.Client_Person_Name || leadContext.contact_name || ''),
+                Client_Company_Name: String(mappedData?.Client_Company_Name || leadContext.Client_Company_Name || leadContext.company_name || ''),
+                Lead_Owner: String(mappedData?.Lead_Owner || leadContext.Lead_Owner || leadContext.lead_owner || ''),
+                Product: String(mappedData?.Product || leadContext.Product || leadContext.product || ''),
+                Location: String(mappedData?.Location || leadContext.Location || leadContext.location || ''),
+                Industry: String(mappedData?.Industry || leadContext.Industry || leadContext.industry || ''),
+                Quantity: String(mappedData?.Quantity || leadContext.Quantity || leadContext.quantity || ''),
+                Lead_Type: String(mappedData?.Lead_Type || leadContext.Lead_Type || leadContext.lead_type || ''),
+                Remarks: String(mappedData?.Remarks || leadContext.Remarks || leadContext.remarks || ''),
+
+                // PREVIOUS VARIABLES (Retained for backward compatibility/consistency)
+                name: String(mappedData?.Client_Person_Name || leadContext.contact_name || ''),
+                company_name: String(mappedData?.Client_Company_Name || leadContext.company_name || ''),
+                product: String(mappedData?.Product || leadContext.product || ''),
+                location: String(mappedData?.Location || leadContext.location || ''),
+                quantity: String(mappedData?.Quantity || leadContext.quantity || ''),
+                call_context: String(callContext),
+                call_type: String(callType),
+                enquiry_code: String(enquiryCode || leadContext.enquiry_code || ''),
             },
         };
 
@@ -321,9 +400,9 @@ app.post('/api/call', async (req, res) => {
         console.log(`Agent:     ${agent_id}`);
         console.log(`Phone:     ${recipient_phone_number}`);
         console.log(`From:      ${BOLNA_FROM_NUMBER || 'Bolna default'}`);
-        console.log(`Lead:      ${leadContext.enquiry_code} – ${leadContext.company_name}`);
-        console.log(`Status:    ${leadStatus}`);
-        console.log(`Variables: name=${leadContext.contact_name}, company_name=${leadContext.company_name}, product=${leadContext.product}, location=${leadContext.location}`);
+        console.log(`Lead:      ${enquiryCode || leadContext.enquiry_code} – ${leadContext.Client_Company_Name || leadContext.company_name}`);
+        console.log(`Status:    ${finalStatus}`);
+        console.log(`Variables Sent:`, JSON.stringify(bolnaPayload.user_data, null, 2));
         console.log(`Context:   ${callContext}`);
         console.log(`========================\n`);
 
