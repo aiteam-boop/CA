@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'client/dist')));
 app.use(express.json());
 app.use(cors());
 
@@ -1246,6 +1246,11 @@ app.get('/api/transcript/:id', async (req, res) => {
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
+});
+
+// Catch-all route to serve React's index.html for Single Page App routing
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'client/dist', 'index.html'));
 });
 
 server.listen(PORT, () => {
